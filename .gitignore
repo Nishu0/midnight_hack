@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+logs/
+.DS_Store
+.claude/
+frontend/public/midnight/
+.turbo/
+.pnpm-store/
