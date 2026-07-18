@@ -1,0 +1,190 @@
+// nightpool — sealed-bid batch auction dex on midnight
+// SPDX-License-Identifier: Apache-2.0
+//
+// trades clear in discrete batches at one uniform price. orders are committed as
+// hashes, revealed via zk proof, and settled together. no ordering within a batch
+// so no front-running or sandwiching. individual sizes/prices stay private; only
+// the clearing price and aggregate per-tick volumes are public.
+
+pragma language_version >= 0.23;
+
+import CompactStandardLibrary;
+
+// batch lifecycle, one direction only
+export enum Phase {
+  COMMIT,
+  REVEAL,
+  SETTLED
+}
+
+// private order, lives in the trader's witness state until reveal.
+// side 0 = buy, 1 = sell. limitTick indexes the fixed 0..15 price grid:
+// a buy fills at any clearing tick <= limit, a sell at any tick >= limit.
+export struct Order {
+  side: Uint<8>;
+  amount: Uint<64>;
+  limitTick: Uint<8>;
+  salt: Bytes<32>;
+}
+
+// public state
+export ledger phase: Phase;
+export ledger batchId: Counter;
+
+export ledger commitments: Set<Bytes<32>>;
+export ledger committedCount: Uint<8>;
+export ledger revealedCount: Uint<8>;
+
+// aggregate curves by price tick. demand[p]/supply[p] = volume willing to trade
+// at clearing tick p. only aggregates are public, never per-order buckets.
+export ledger demand: Map<Uint<8>, Uint<64>>;
+export ledger supply: Map<Uint<8>, Uint<64>>;
+
+// spent reveal nullifiers, one reveal per order
+export ledger nullifiers: Set<Bytes<32>>;
+
+export ledger clearingTick: Uint<8>;   // 0 also means no cross
+export ledger clearedVolume: Uint<64>;
+
+// claim bookkeeping
+export ledger filled: Map<Bytes<32>, Uint<64>>;
+export ledger claimed: Set<Bytes<32>>;
+
+// witnesses (see witnesses.ts)
+witness getOrder(): Order;
+witness getSecretKey(): Bytes<32>;
+
+// tick grid = 16, batch size = 8. the reveal/settle loops below are fixed at 16.
+
+// commitment = h(sk, side, amount, limitTick, salt): binding + hiding
+export circuit orderCommitment(o: Order, sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<5, Bytes<32>>>([
+    sk,
+    o.side as Field as Bytes<32>,
+    o.amount as Field as Bytes<32>,
+    o.limitTick as Field as Bytes<32>,
+    o.salt
+  ]);
+}
+
+// reveal nullifier, domain-separated from the claim one
+export circuit revealNullifier(o: Order, sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>([
+    pad(32, "nightpool:reveal:"),
+    sk,
+    o.salt
+  ]);
+}
+
+// claim nullifier, unlinkable to the commitment
+export circuit claimNullifier(o: Order, sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>([
+    pad(32, "nightpool:claim:"),
+    sk,
+    o.salt
+  ]);
+}
+
+constructor() {
+  phase = Phase.COMMIT;
+  committedCount = 0;
+  revealedCount = 0;
+  clearingTick = 0;
+  clearedVolume = 0;
+  batchId.increment(1);
+}
+
+// commit phase: publish just the hash. opens reveals once the batch fills (8).
+export circuit commitOrder(commitment: Bytes<32>): [] {
+  assert(phase == Phase.COMMIT, "NightPool: not in commit phase");
+  assert(!commitments.member(disclose(commitment)), "NightPool: duplicate commitment");
+  commitments.insert(disclose(commitment));
+  committedCount = (committedCount + 1) as Uint<8>;
+  if (committedCount >= 8) {
+    phase = Phase.REVEAL;
+  }
+}
+
+// reveal phase: prove the order hashes to a live commitment, then fold its
+// amount into the aggregate curves. only the buckets + a nullifier go public.
+export circuit revealOrder(): [] {
+  assert(phase == Phase.REVEAL, "NightPool: not in reveal phase");
+
+  const o = getOrder();
+  const sk = getSecretKey();
+
+  const commitment = orderCommitment(o, sk);
+  assert(commitments.member(disclose(commitment)), "NightPool: unknown commitment");
+
+  const nul = revealNullifier(o, sk);
+  assert(!nullifiers.member(disclose(nul)), "NightPool: order already revealed");
+  nullifiers.insert(disclose(nul));
+
+  const t = disclose(o.limitTick);
+  const amt = disclose(o.amount);
+  const isBuy = disclose(o.side) == 0;
+
+  // touch every tick each reveal (uniform writes). buy adds to demand[p] for
+  // p <= limit, sell adds to supply[p] for p >= limit.
+  for (const p of 0..16) {
+    const pt = p as Uint<8>;
+    const dPrev = demand.member(pt) ? demand.lookup(pt) : 0 as Uint<64>;
+    const sPrev = supply.member(pt) ? supply.lookup(pt) : 0 as Uint<64>;
+    const dAdd = (isBuy && (pt <= t)) ? amt : 0 as Uint<64>;
+    const sAdd = ((!isBuy) && (pt >= t)) ? amt : 0 as Uint<64>;
+    demand.insert(pt, (dPrev + dAdd) as Uint<64>);
+    supply.insert(pt, (sPrev + sAdd) as Uint<64>);
+  }
+
+  revealedCount = (revealedCount + 1) as Uint<8>;
+}
+
+// settle: fixed 16-tick scan, pick the tick maximizing min(demand, supply).
+// no per-order ordering is consulted, so there's nothing to front-run.
+export circuit settleBatch(): [] {
+  assert(phase == Phase.REVEAL, "NightPool: not in reveal phase");
+
+  clearingTick = 0;
+  clearedVolume = 0;
+
+  for (const p of 0..16) {
+    const pt = p as Uint<8>;
+    const d = demand.member(pt) ? demand.lookup(pt) : 0 as Uint<64>;
+    const s = supply.member(pt) ? supply.lookup(pt) : 0 as Uint<64>;
+    const matched = d < s ? d : s;
+    if (matched > clearedVolume) {
+      clearedVolume = matched;
+      clearingTick = pt;
+    }
+  }
+
+  phase = Phase.SETTLED;
+}
+
+// claim: prove order ownership and withdraw. eligible if the limit crosses the
+// clearing tick; if the batch never crossed everyone is refunded in full.
+export circuit claim(): [] {
+  assert(phase == Phase.SETTLED, "NightPool: batch not settled");
+
+  const o = getOrder();
+  const sk = getSecretKey();
+
+  const commitment = orderCommitment(o, sk);
+  assert(commitments.member(disclose(commitment)), "NightPool: unknown commitment");
+
+  const cnul = claimNullifier(o, sk);
+  assert(!claimed.member(disclose(cnul)), "NightPool: already claimed");
+
+  const side = disclose(o.side);
+  const limit = disclose(o.limitTick);
+  const amt = disclose(o.amount);
+
+  const eligible = side == 0
+    ? (limit >= clearingTick)
+    : (limit <= clearingTick);
+  const noCross = clearedVolume == 0;
+  const payout = (noCross || eligible) ? amt : 0 as Uint<64>;
+
+  claimed.insert(disclose(cnul));
+  filled.insert(disclose(cnul), payout);
+}
