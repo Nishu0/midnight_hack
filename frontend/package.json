@@ -1,0 +1,37 @@
+{
+  "name": "@nightpool/frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "pnpm copy-keys && tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "copy-keys": "mkdir -p ./public/midnight/nightpool/keys ./public/midnight/nightpool/zkir && cp -r ../contract/src/managed/nightpool/keys/* ./public/midnight/nightpool/keys/ && cp -r ../contract/src/managed/nightpool/zkir/* ./public/midnight/nightpool/zkir/"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-js": "^1.0.0",
+    "@midnight-ntwrk/compact-runtime": "^1.0.0",
+    "@midnight-ntwrk/ledger-v8": "^8.0.0",
+    "@midnight-ntwrk/midnight-js": "^3.0.0",
+    "@midnight-ntwrk/midnight-js-fetch-zk-config-provider": "^3.0.0",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "^3.0.0",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "^3.0.0",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "^3.0.0",
+    "@nightpool/contract": "workspace:*",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@originjs/vite-plugin-commonjs": "^1.0.3",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.4.1",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5",
+    "vite-plugin-node-polyfills": "^0.23.0",
+    "vite-plugin-wasm": "^3.4.1"
+  }
+}
