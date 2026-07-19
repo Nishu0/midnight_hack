@@ -11,18 +11,9 @@
     "copy-keys": "mkdir -p ./public/midnight/nightpool/keys ./public/midnight/nightpool/zkir && cp -r ../contract/src/managed/nightpool/keys/* ./public/midnight/nightpool/keys/ && cp -r ../contract/src/managed/nightpool/zkir/* ./public/midnight/nightpool/zkir/"
   },
   "dependencies": {
-    "@midnight-ntwrk/compact-js": "^1.0.0",
-    "@midnight-ntwrk/compact-runtime": "^1.0.0",
-    "@midnight-ntwrk/ledger-v8": "^8.0.0",
-    "@midnight-ntwrk/midnight-js": "^3.0.0",
-    "@midnight-ntwrk/midnight-js-fetch-zk-config-provider": "^3.0.0",
-    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "^3.0.0",
-    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "^3.0.0",
-    "@midnight-ntwrk/midnight-js-level-private-state-provider": "^3.0.0",
     "@nightpool/contract": "workspace:*",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "rxjs": "^7.8.1"
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
     "@originjs/vite-plugin-commonjs": "^1.0.3",
