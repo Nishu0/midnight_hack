@@ -7,9 +7,10 @@ export type NetworkName = "undeployed" | "testnet" | "preview" | "preprod" | "ma
 const env = import.meta.env;
 
 export const config = {
-  // network id hinted to the wallet on connect; the app then follows whatever the
-  // wallet reports back. set VITE_NETWORK_ID=undeployed for the local docker stack.
-  networkId: (env.VITE_NETWORK_ID as NetworkName) ?? "undeployed",
+  // network id hinted to the wallet on connect; must match the midnight network your
+  // wallet is on or lace rejects with a mismatch. midnight networks are undeployed
+  // (local docker), preview, preprod. defaults to preview.
+  networkId: (env.VITE_NETWORK_ID as NetworkName) ?? "preview",
   proofServer: env.VITE_PROOF_SERVER_URI ?? "http://127.0.0.1:6300",
   // where copy-keys drops the compiled prover/verifier assets
   zkConfigPath: "/midnight/nightpool",
