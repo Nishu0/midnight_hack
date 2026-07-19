@@ -5,4 +5,5 @@
 
 export * as NightPool from "./managed/nightpool/contract/index.js";
 export type { Order, Ledger } from "./managed/nightpool/contract/index.js";
+export * as Oracle from "./managed/oracle/contract/index.js";
 export * from "./witnesses";

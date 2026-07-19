@@ -1,0 +1,57 @@
+// noctis batch price oracle — deliberately public, no witnesses, no privacy.
+// nightpool's settle produces one clearing tick + matched volume per batch; this
+// records that series so anyone can read a price history and compute a vwap.
+// prices produced without a single order ever being public.
+
+pragma language_version >= 0.23;
+
+import CompactStandardLibrary;
+
+export struct PricePoint {
+  batchId: Uint<64>;
+  tick: Uint<8>;
+  volume: Uint<64>;
+}
+
+export ledger latestBatchId: Uint<64>;
+export ledger recorded: Uint<64>;           // total points recorded
+export ledger head: Uint<8>;                 // ring write cursor (0..7)
+export ledger ring: Map<Uint<8>, PricePoint>; // last 8 points
+
+// cumulative sums for a volume-weighted average tick (vwap = cumTickVol / cumVol,
+// computed client-side to avoid on-chain division). zero-volume batches skipped.
+export ledger cumTickVolume: Uint<64>;
+export ledger cumVolume: Uint<64>;
+
+constructor() {
+  latestBatchId = 0;
+  recorded = 0;
+  head = 0;
+  cumTickVolume = 0;
+  cumVolume = 0;
+}
+
+// record one settled batch. record no-cross batches too (volume 0) so the series
+// is honest; they just don't move the vwap.
+export circuit recordBatch(batchId: Uint<64>, tick: Uint<8>, volume: Uint<64>): [] {
+  assert(disclose(batchId) == (latestBatchId + 1) as Uint<64>, "oracle: batchId must be latest + 1");
+  assert(disclose(tick) < 16, "oracle: tick out of range");
+
+  const idx = head;
+  ring.insert(idx, PricePoint {
+    batchId: disclose(batchId),
+    tick: disclose(tick),
+    volume: disclose(volume)
+  });
+
+  // advance the ring cursor without modulo
+  head = ((head + 1) as Uint<8> == 8) ? 0 : (head + 1) as Uint<8>;
+  latestBatchId = disclose(batchId);
+  recorded = (recorded + 1) as Uint<64>;
+
+  const v = disclose(volume);
+  if (v > 0) {
+    cumTickVolume = (cumTickVolume + (disclose(tick) as Uint<64>) * v) as Uint<64>;
+    cumVolume = (cumVolume + v) as Uint<64>;
+  }
+}

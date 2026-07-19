@@ -16,7 +16,7 @@
     }
   },
   "scripts": {
-    "compact": "compact compile +0.31.0 src/nightpool.compact src/managed/nightpool",
+    "compact": "compact compile +0.31.0 src/nightpool.compact src/managed/nightpool && compact compile +0.31.0 src/oracle.compact src/managed/oracle",
     "build": "rm -rf dist && tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed && cp ./src/nightpool.compact ./dist",
     "test:compile": "pnpm compact && pnpm build",
     "typecheck": "tsc -p tsconfig.json --noEmit"
