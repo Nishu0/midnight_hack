@@ -5,9 +5,11 @@
 import { map, type Observable } from "rxjs";
 import { CompiledContract } from "@midnight-ntwrk/compact-js";
 import { contracts } from "@midnight-ntwrk/midnight-js";
-import { NightPool, createNightPoolPrivateState, withOrder, witnesses } from "@nightpool/contract";
+import { NightPool, createNightPoolPrivateState, stageOp, witnesses } from "@nightpool/contract";
 import type { Order } from "@nightpool/contract";
 import { config } from "@/config";
+import { randomBytes, loadSecretKey } from "./secret";
+import { noteStore } from "./note-store";
 import type { DraftOrder, PoolState, PhaseName } from "@/types";
 import { type NightPoolProviders, NIGHTPOOL_PRIVATE_STATE_ID } from "./providers";
 
@@ -15,16 +17,6 @@ const compiled = CompiledContract.make("nightpool", NightPool.Contract).pipe(
   CompiledContract.withWitnesses(witnesses),
   CompiledContract.withCompiledFileAssets(config.zkConfigPath),
 );
-
-const randomBytes = (n: number): Uint8Array => crypto.getRandomValues(new Uint8Array(n));
-
-const loadSecretKey = (): Uint8Array => {
-  const stored = localStorage.getItem("nightpool.sk");
-  if (stored) return Uint8Array.from(atob(stored), (c) => c.charCodeAt(0));
-  const sk = randomBytes(32);
-  localStorage.setItem("nightpool.sk", btoa(String.fromCharCode(...sk)));
-  return sk;
-};
 
 const draftToOrder = (draft: DraftOrder): Order => ({
   side: draft.side === "buy" ? 0n : 1n,
@@ -92,36 +84,49 @@ export class NightPoolAPI {
     return new NightPoolAPI(address, deployed, providers);
   }
 
-  // current on-chain batch id, used to namespace commitments
-  private async currentBatchId(): Promise<bigint> {
-    const st = await this.providers.publicDataProvider.queryContractState(this.address);
-    if (!st) throw new Error("pool state unavailable");
-    return NightPool.ledger(st.data).batchId;
+  // note scope = this pool's contract address (each pool has its own vault notes)
+  private get scope(): string {
+    return this.address;
   }
 
-  private async stage(order: Order): Promise<void> {
+  private async stage(op: Parameters<typeof stageOp>[1]): Promise<void> {
     const prev =
       (await this.providers.privateStateProvider.get(NIGHTPOOL_PRIVATE_STATE_ID)) ??
       createNightPoolPrivateState(this.secretKey);
-    await this.providers.privateStateProvider.set(NIGHTPOOL_PRIVATE_STATE_ID, withOrder(prev, order));
+    await this.providers.privateStateProvider.set(NIGHTPOOL_PRIVATE_STATE_ID, stageOp(prev, op));
   }
 
-  async commit(draft: DraftOrder): Promise<Order> {
-    const bid = await this.currentBatchId();
+  // deposit funds into the pool's built-in shielded vault as a private note
+  async deposit(network: string, amount: bigint): Promise<void> {
+    const salt = randomBytes(32);
+    await this.stage({ newSalt: salt });
+    await this.deployed.callTx.deposit(amount);
+    noteStore.add(network, this.scope, amount, salt);
+  }
+
+  // commit: escrow the order by spending a funding note (>= amount), mint change
+  async commit(network: string, draft: DraftOrder): Promise<Order> {
+    const funding = noteStore.unspent(network, this.scope).find((n) => n.amount >= draft.amount);
+    if (!funding) throw new Error("no vault note large enough — deposit into the pool first");
+
     const order = draftToOrder(draft);
-    await this.stage(order);
-    const commitment = NightPool.pureCircuits.orderCommitment(order, this.secretKey, bid);
-    await this.deployed.callTx.commitOrder(commitment);
+    const changeSalt = randomBytes(32);
+    await this.stage({ order, note: { amount: funding.amount, salt: funding.salt }, newSalt: changeSalt });
+    await this.deployed.callTx.commitOrder();
+
+    noteStore.markSpent(network, this.scope, funding.salt);
+    const change = funding.amount - draft.amount;
+    if (change > 0n) noteStore.add(network, this.scope, change, changeSalt);
     return order;
   }
 
   async cancel(order: Order): Promise<void> {
-    await this.stage(order);
+    await this.stage({ order });
     await this.deployed.callTx.cancelOrder();
   }
 
   async reveal(order: Order): Promise<void> {
-    await this.stage(order);
+    await this.stage({ order });
     await this.deployed.callTx.revealOrder();
   }
 
@@ -133,9 +138,20 @@ export class NightPoolAPI {
     await this.deployed.callTx.settleBatch();
   }
 
-  async claim(order: Order): Promise<void> {
-    await this.stage(order);
+  // claim: release escrow as a fresh unlinkable note (persisted locally)
+  async claim(network: string, order: Order): Promise<void> {
+    const payoutSalt = randomBytes(32);
+    await this.stage({ order, newSalt: payoutSalt });
     await this.deployed.callTx.claim();
+
+    // mirror the contract's payout so the local note store stays in sync
+    const s = await this.snapshot();
+    const clearing = s.clearingTick;
+    const eligible = order.side === 0n ? order.limitTick >= clearing : order.limitTick <= clearing;
+    const noCross = s.clearedVolume === 0n;
+    const filled = eligible && !noCross;
+    const payout = filled ? order.amount - 1n : order.amount; // protocolFee = 1
+    if (payout > 0n) noteStore.add(network, this.scope, payout, payoutSalt);
   }
 
   async startNextBatch(): Promise<void> {

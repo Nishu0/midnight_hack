@@ -8,17 +8,21 @@ export type Order = { side: bigint;
                       salt: Uint8Array
                     };
 
+export type Note = { amount: bigint; salt: Uint8Array };
+
 export type Witnesses<PS> = {
   getOrder(context: __compactRuntime.WitnessContext<Ledger, PS>): [PS, Order];
   getSecretKey(context: __compactRuntime.WitnessContext<Ledger, PS>): [PS, Uint8Array];
   divFloor(context: __compactRuntime.WitnessContext<Ledger, PS>,
            a_0: bigint,
            b_0: bigint): [PS, bigint];
+  getFundingNote(context: __compactRuntime.WitnessContext<Ledger, PS>): [PS, Note];
+  getNewSalt(context: __compactRuntime.WitnessContext<Ledger, PS>): [PS, Uint8Array];
 }
 
 export type ImpureCircuits<PS> = {
-  commitOrder(context: __compactRuntime.CircuitContext<PS>,
-              commitment_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
+  deposit(context: __compactRuntime.CircuitContext<PS>, amount_0: bigint): __compactRuntime.CircuitResults<PS, []>;
+  commitOrder(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
   cancelOrder(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
   forceReveal(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
   revealOrder(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
@@ -28,8 +32,8 @@ export type ImpureCircuits<PS> = {
 }
 
 export type ProvableCircuits<PS> = {
-  commitOrder(context: __compactRuntime.CircuitContext<PS>,
-              commitment_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
+  deposit(context: __compactRuntime.CircuitContext<PS>, amount_0: bigint): __compactRuntime.CircuitResults<PS, []>;
+  commitOrder(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
   cancelOrder(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
   forceReveal(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
   revealOrder(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
@@ -45,6 +49,8 @@ export type PureCircuits = {
   claimNullifier(o_0: Order, sk_0: Uint8Array, bid_0: bigint): Uint8Array;
   cancelNullifier(o_0: Order, sk_0: Uint8Array, bid_0: bigint): Uint8Array;
   tickPriceScaled(tick_0: bigint): bigint;
+  noteCommitment(sk_0: Uint8Array, amount_0: bigint, salt_0: Uint8Array): Uint8Array;
+  noteNullifier(sk_0: Uint8Array, salt_0: Uint8Array): Uint8Array;
 }
 
 export type Circuits<PS> = {
@@ -68,8 +74,15 @@ export type Circuits<PS> = {
                   sk_0: Uint8Array,
                   bid_0: bigint): __compactRuntime.CircuitResults<PS, Uint8Array>;
   tickPriceScaled(context: __compactRuntime.CircuitContext<PS>, tick_0: bigint): __compactRuntime.CircuitResults<PS, bigint>;
-  commitOrder(context: __compactRuntime.CircuitContext<PS>,
-              commitment_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
+  noteCommitment(context: __compactRuntime.CircuitContext<PS>,
+                 sk_0: Uint8Array,
+                 amount_0: bigint,
+                 salt_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
+  noteNullifier(context: __compactRuntime.CircuitContext<PS>,
+                sk_0: Uint8Array,
+                salt_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
+  deposit(context: __compactRuntime.CircuitContext<PS>, amount_0: bigint): __compactRuntime.CircuitResults<PS, []>;
+  commitOrder(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
   cancelOrder(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
   forceReveal(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
   revealOrder(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
@@ -143,6 +156,19 @@ export type Ledger = {
     lookup(key_0: Uint8Array): bigint;
     [Symbol.iterator](): Iterator<[Uint8Array, bigint]>
   };
+  noteCommitments: {
+    isEmpty(): boolean;
+    size(): bigint;
+    member(elem_0: Uint8Array): boolean;
+    [Symbol.iterator](): Iterator<Uint8Array>
+  };
+  noteNullifiers: {
+    isEmpty(): boolean;
+    size(): bigint;
+    member(elem_0: Uint8Array): boolean;
+    [Symbol.iterator](): Iterator<Uint8Array>
+  };
+  readonly totalDeposited: bigint;
 }
 
 export type ContractReferenceLocations = any;

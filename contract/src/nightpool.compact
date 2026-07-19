@@ -28,6 +28,14 @@ export struct Order {
   salt: Bytes<32>;
 }
 
+// shielded balance note (zcash-style): a private (owner sk, amount, salt) tuple.
+// the chain only ever sees note commitments + nullifiers, never amounts/owners.
+// notes are the escrow: commit spends one, claim mints one.
+export struct Note {
+  amount: Uint<64>;
+  salt: Bytes<32>;
+}
+
 // public state
 export ledger phase: Phase;
 export ledger batchId: Uint<64>;             // current batch, namespaces everything
@@ -61,11 +69,19 @@ export ledger feesAccrued: Uint<64>;
 export ledger filledBase: Map<Bytes<32>, Uint<64>>;
 export ledger filledQuote: Map<Bytes<32>, Uint<64>>;
 
+// built-in shielded vault: notes escrow orders
+export ledger noteCommitments: Set<Bytes<32>>;
+export ledger noteNullifiers: Set<Bytes<32>>;
+export ledger totalDeposited: Uint<64>;
+
 // witnesses (see witnesses.ts)
 witness getOrder(): Order;
 witness getSecretKey(): Bytes<32>;
 // floor((a)/(b)) computed off-chain, verified on-chain (compact has no int division)
 witness divFloor(a: Uint<128>, b: Uint<64>): Uint<64>;
+// the note being spent to fund an order (commit), and a fresh salt for the new note
+witness getFundingNote(): Note;
+witness getNewSalt(): Bytes<32>;
 
 // grid = 16 ticks, batch size = 2. price(tick) = 0.5 + tick*0.1, scaled by 1e6.
 
@@ -109,6 +125,20 @@ export circuit tickPriceScaled(tick: Uint<8>): Uint<64> {
   return (500000 + (tick as Uint<64>) * 100000) as Uint<64>;
 }
 
+// note commitment / nullifier
+export circuit noteCommitment(sk: Bytes<32>, amount: Uint<64>, salt: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>([
+    pad(32, "noctis:note:"),
+    sk,
+    amount as Field as Bytes<32>,
+    salt
+  ]);
+}
+
+export circuit noteNullifier(sk: Bytes<32>, salt: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>([pad(32, "noctis:note:nul:"), sk, salt]);
+}
+
 constructor() {
   phase = Phase.COMMIT;
   batchId = 1;
@@ -122,15 +152,50 @@ constructor() {
   totalCleared = 0;
   protocolFee = 1;
   feesAccrued = 0;
+  totalDeposited = 0;
+}
+
+// deposit: amount is public (funds in). mint a private note the trader can use to
+// escrow orders. private balance = sum of unspent notes, tracked client-side.
+export circuit deposit(amount: Uint<64>): [] {
+  assert(disclose(amount) > 0, "Noctis: deposit must be positive");
+  const sk = getSecretKey();
+  const salt = getNewSalt();
+  const c = noteCommitment(sk, disclose(amount), salt);
+  assert(!noteCommitments.member(disclose(c)), "Noctis: duplicate note");
+  noteCommitments.insert(disclose(c));
+  totalDeposited = (totalDeposited + disclose(amount)) as Uint<64>;
 }
 
 // ---- circuits ----
 
-// commit phase: publish just the hash. opens reveal once the batch fills (2).
-export circuit commitOrder(commitment: Bytes<32>): [] {
+// commit phase: escrow the order by spending a funding note (>= order amount), mint
+// change, and publish only the sealed order hash. amounts stay private — only note
+// commitments/nullifiers and the sealed hash go on-chain.
+export circuit commitOrder(): [] {
   assert(phase == Phase.COMMIT, "Noctis: not in commit phase");
+  const o = getOrder();
+  const sk = getSecretKey();
+
+  // spend a funding note to lock the order's escrow
+  const fn = getFundingNote();
+  const fc = noteCommitment(sk, fn.amount, fn.salt);
+  assert(noteCommitments.member(disclose(fc)), "Noctis: unknown funding note");
+  const fnul = noteNullifier(sk, fn.salt);
+  assert(!noteNullifiers.member(disclose(fnul)), "Noctis: funding note already spent");
+  noteNullifiers.insert(disclose(fnul));
+  assert(fn.amount >= o.amount, "Noctis: funding note too small for order");
+
+  // mint a change note for the remainder (amount stays private)
+  const change = (fn.amount - o.amount) as Uint<64>;
+  const changeSalt = getNewSalt();
+  noteCommitments.insert(disclose(noteCommitment(sk, change, changeSalt)));
+
+  // publish the sealed bid
+  const commitment = orderCommitment(o, sk, batchId);
   assert(!commitments.member(disclose(commitment)), "Noctis: duplicate commitment");
   commitments.insert(disclose(commitment));
+
   committedCount = (committedCount + 1) as Uint<8>;
   if (committedCount >= 2) {
     phase = Phase.REVEAL;
@@ -293,6 +358,12 @@ export circuit claim(): [] {
   claimed.insert(disclose(cnul));
   filledBase.insert(disclose(cnul), disclose(baseNet));
   filledQuote.insert(disclose(cnul), disclose(quoteOut));
+
+  // release escrow as a fresh, unlinkable note: filled proceeds + refund of the
+  // unfilled remainder, minus fee. on no-cross the whole amount is refunded.
+  const payoutAmt = (filledOrder ? (amt - fee) : amt) as Uint<64>;
+  const payoutSalt = getNewSalt();
+  noteCommitments.insert(disclose(noteCommitment(sk, payoutAmt, payoutSalt)));
 }
 
 // start the next batch once settled: bump batchId (which re-namespaces everything),

@@ -35,6 +35,7 @@ export function useNightPool() {
   const [vaultBalance, setVaultBalance] = useState<bigint>(0n);
   const [notes, setNotes] = useState<LocalNote[]>([]);
   const [oracleSeries, setOracleSeries] = useState<OracleSeries>();
+  const [poolBalance, setPoolBalance] = useState<bigint>(0n);
 
   const apiRef = useRef<NightPoolAPI | null>(null);
   const walletRef = useRef<ConnectedAPI | null>(null);
@@ -190,6 +191,7 @@ export function useNightPool() {
         setOrders([]);
         setContractAddress(api.address);
         setPoolMeta(rec);
+        setPoolBalance(noteStore.balance(networkRef.current, api.address));
         subscribe(api);
         // attach this pool's oracle, if it has one
         oracleApiRef.current = null;
@@ -228,6 +230,7 @@ export function useNightPool() {
         setOracleSeries(undefined);
         setContractAddress(api.address);
         setPoolMeta(full);
+        setPoolBalance(noteStore.balance(networkRef.current, api.address));
         subscribe(api);
       }),
     [run, subscribe, subscribeOracle, refreshPools],
@@ -247,13 +250,31 @@ export function useNightPool() {
     void refreshPools();
   }, [refreshPools]);
 
+  // per-pool private balance (sum of unspent notes for the open pool)
+  const refreshPoolNotes = useCallback(() => {
+    const net = networkRef.current;
+    const addr = apiRef.current?.address;
+    if (!net || !addr) return;
+    setPoolBalance(noteStore.balance(net, addr));
+  }, []);
+
+  const depositPool = useCallback(
+    (amount: bigint) =>
+      run("depositing to pool", async () => {
+        await apiRef.current!.deposit(networkRef.current, amount);
+        refreshPoolNotes();
+      }),
+    [run, refreshPoolNotes],
+  );
+
   const commit = useCallback(
     (draft: DraftOrder) =>
       run("committing order", async () => {
-        const order = await apiRef.current!.commit(draft);
+        const order = await apiRef.current!.commit(networkRef.current, draft);
         setOrders((prev) => [...prev, order]);
+        refreshPoolNotes();
       }),
-    [run],
+    [run, refreshPoolNotes],
   );
 
   const revealAll = useCallback(
@@ -303,9 +324,10 @@ export function useNightPool() {
   const claimAll = useCallback(
     () =>
       run("claiming fills", async () => {
-        for (const order of orders) await apiRef.current!.claim(order);
+        for (const order of orders) await apiRef.current!.claim(networkRef.current, order);
+        refreshPoolNotes();
       }),
-    [run, orders],
+    [run, orders, refreshPoolNotes],
   );
 
   useEffect(
@@ -353,6 +375,8 @@ export function useNightPool() {
     createPool,
     openPool,
     closePool,
+    poolBalance,
+    depositPool,
     commit,
     cancel,
     revealAll,

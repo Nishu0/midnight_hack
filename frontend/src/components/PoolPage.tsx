@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { OrderForm } from "@/components/OrderForm";
 import { BatchStatus } from "@/components/BatchStatus";
 import { DepthChart } from "@/components/DepthChart";
@@ -24,11 +25,15 @@ type Props = {
   onStartNextBatch: () => void;
   onClaim: () => void;
   oracleSeries?: OracleSeries;
+  poolBalance: bigint;
+  onDeposit: (amount: bigint) => void;
 };
 
 export function PoolPage(p: Props) {
   const canCommit = p.pool?.phase === "commit" && !p.busy;
   const pair = p.meta?.base && p.meta?.quote ? `${p.meta.base} / ${p.meta.quote}` : "tDUST / mock";
+  const [dep, setDep] = useState("500");
+  const depAmt = Math.max(0, Math.floor(Number(dep) || 0));
 
   return (
     <div className="shell">
@@ -45,6 +50,20 @@ export function PoolPage(p: Props) {
 
       <main className="grid">
         <div className="col-left">
+          <section className="card rise">
+            <div className="eyebrow">step 0 · fund</div>
+            <h2>pool vault</h2>
+            <p className="hint">
+              deposit to mint a private note, then orders escrow from it. private balance:{" "}
+              <b className="mono" style={{ color: "var(--buy)" }}>{p.poolBalance.toString()}</b>
+            </p>
+            <div className="join">
+              <input value={dep} onChange={(e) => setDep(e.target.value)} inputMode="numeric" />
+              <button className="btn" disabled={depAmt <= 0 || !!p.busy} onClick={() => p.onDeposit(BigInt(depAmt))}>
+                {p.busy === "depositing to pool" ? "depositing…" : "deposit"}
+              </button>
+            </div>
+          </section>
           <OrderForm disabled={!canCommit} onCommit={p.onCommit} />
           <ClaimPanel pool={p.pool} myOrders={p.myOrders} busy={p.busy} onClaim={p.onClaim} onCancel={p.onCancel} />
         </div>

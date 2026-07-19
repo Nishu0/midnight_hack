@@ -56,6 +56,8 @@ export default function App() {
           onStartNextBatch={np.startNextBatch}
           onClaim={np.claimAll}
           oracleSeries={np.oracleSeries}
+          poolBalance={np.poolBalance}
+          onDeposit={np.depositPool}
         />
       )}
 
