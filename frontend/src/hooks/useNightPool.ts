@@ -65,8 +65,22 @@ export function useNightPool() {
       await fn();
       console.info(`[nightpool] ${label} ✓`);
     } catch (e) {
-      console.error(`[nightpool] ${label} failed:`, e);
-      setError((e as Error).message ?? String(e));
+      const err = e as Error & { cause?: unknown };
+      console.error(`[nightpool] ${label} failed`);
+      console.error("  message:", err?.message);
+      console.error("  stack:", err?.stack);
+      console.error("  cause:", err?.cause);
+      try {
+        console.error("  json:", JSON.stringify(err, Object.getOwnPropertyNames(err ?? {})));
+      } catch {
+        /* ignore */
+      }
+      const msg =
+        err?.message ||
+        (err?.cause instanceof Error ? err.cause.message : undefined) ||
+        String(e) ||
+        "unknown error (see console)";
+      setError(msg);
     } finally {
       setBusy(undefined);
     }
