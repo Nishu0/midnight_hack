@@ -8,7 +8,7 @@
     "build": "pnpm copy-keys && tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "copy-keys": "mkdir -p ./public/midnight/nightpool/keys ./public/midnight/nightpool/zkir && cp -r ../contract/src/managed/nightpool/keys/* ./public/midnight/nightpool/keys/ && cp -r ../contract/src/managed/nightpool/zkir/* ./public/midnight/nightpool/zkir/"
+    "copy-keys": "mkdir -p ./public/midnight/nightpool/keys ./public/midnight/nightpool/zkir ./public/midnight/vault/keys ./public/midnight/vault/zkir && cp -r ../contract/src/managed/nightpool/keys/* ./public/midnight/nightpool/keys/ && cp -r ../contract/src/managed/nightpool/zkir/* ./public/midnight/nightpool/zkir/ && cp -r ../contract/src/managed/vault/keys/* ./public/midnight/vault/keys/ && cp -r ../contract/src/managed/vault/zkir/* ./public/midnight/vault/zkir/"
   },
   "dependencies": {
     "@nightpool/contract": "workspace:*",

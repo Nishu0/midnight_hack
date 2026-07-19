@@ -14,12 +14,13 @@ type Props = {
   pools: PoolRecord[];
   busy?: string;
   onCreate: () => void;
+  onVault: () => void;
   onOpen: (rec: PoolRecord) => void;
   onOpenAddress: (address: string) => void;
   onRefresh: () => void;
 };
 
-export function PoolsList({ pools, busy, onCreate, onOpen, onOpenAddress, onRefresh }: Props) {
+export function PoolsList({ pools, busy, onCreate, onVault, onOpen, onOpenAddress, onRefresh }: Props) {
   const [addr, setAddr] = useState("");
 
   return (
@@ -31,6 +32,9 @@ export function PoolsList({ pools, busy, onCreate, onOpen, onOpenAddress, onRefr
           <p className="hint">sealed-bid batch auction markets. open one to trade, or spin up your own.</p>
         </div>
         <div className="pools-actions">
+          <button className="btn" onClick={onVault} disabled={!!busy}>
+            🔒 vault
+          </button>
           <button className="btn" onClick={onRefresh} disabled={!!busy}>
             refresh
           </button>

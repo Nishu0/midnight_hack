@@ -10,17 +10,25 @@ import { FetchZkConfigProvider } from "@midnight-ntwrk/midnight-js-fetch-zk-conf
 import type { ProvableCircuitId } from "@midnight-ntwrk/compact-js";
 import { types, networkId as networkIdApi } from "@midnight-ntwrk/midnight-js";
 import type { ConnectedAPI, Configuration } from "@midnight-ntwrk/dapp-connector-api";
-import { NightPool, type NightPoolPrivateState } from "@nightpool/contract";
+import { NightPool, type NightPoolPrivateState, Vault, type VaultPrivateState } from "@nightpool/contract";
 import { config } from "@/config";
 import { inMemoryPrivateStateProvider } from "./in-memory-private-state-provider";
 
 export const NIGHTPOOL_PRIVATE_STATE_ID = "nightpoolPrivateState";
+export const VAULT_PRIVATE_STATE_ID = "vaultPrivateState";
 
 export type NightPoolCircuits = ProvableCircuitId<NightPool.Contract<NightPoolPrivateState>>;
 export type NightPoolProviders = types.MidnightProviders<
   NightPoolCircuits,
   typeof NIGHTPOOL_PRIVATE_STATE_ID,
   NightPoolPrivateState
+>;
+
+export type VaultCircuits = ProvableCircuitId<Vault.Contract<VaultPrivateState>>;
+export type VaultProviders = types.MidnightProviders<
+  VaultCircuits,
+  typeof VAULT_PRIVATE_STATE_ID,
+  VaultPrivateState
 >;
 
 const walletBridge = (api: ConnectedAPI, coinPk: string, encPk: string) => {
@@ -70,6 +78,32 @@ export const buildProviders = (
   const proofUri = service.proverServerUri ?? config.proofServer;
   const { wallet, midnight } = walletBridge(api, coinPk, encPk);
 
+  return {
+    privateStateProvider: inMemoryPrivateStateProvider(),
+    publicDataProvider: indexerPublicDataProvider(service.indexerUri, service.indexerWsUri),
+    zkConfigProvider: zk,
+    proofProvider: httpClientProofProvider(proofUri, zk),
+    walletProvider: wallet,
+    midnightProvider: midnight,
+  };
+};
+
+// same wallet bridge, pointed at the vault's zk assets + private-state id
+export const buildVaultProviders = (
+  api: ConnectedAPI,
+  service: Configuration,
+  coinPk: string,
+  encPk: string,
+  network: string,
+): VaultProviders => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  networkIdApi.setNetworkId(network as any);
+  const zk = new FetchZkConfigProvider<VaultCircuits>(
+    `${window.location.origin}${config.zkVaultPath}`,
+    fetch.bind(window),
+  );
+  const proofUri = service.proverServerUri ?? config.proofServer;
+  const { wallet, midnight } = walletBridge(api, coinPk, encPk);
   return {
     privateStateProvider: inMemoryPrivateStateProvider(),
     publicDataProvider: indexerPublicDataProvider(service.indexerUri, service.indexerWsUri),

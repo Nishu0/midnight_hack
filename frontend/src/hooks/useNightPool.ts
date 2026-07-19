@@ -6,13 +6,17 @@ import type { Subscription } from "rxjs";
 import type { Order } from "@nightpool/contract";
 import type { ConnectedAPI } from "@midnight-ntwrk/dapp-connector-api";
 import { connectWallet } from "@/wallet";
-import { buildProviders } from "@/api/providers";
+import { buildProviders, buildVaultProviders } from "@/api/providers";
 import { NightPoolAPI } from "@/api/nightpool-api";
+import { VaultAPI } from "@/api/vault-api";
+import { noteStore, type LocalNote } from "@/api/note-store";
 import { registry, type PoolRecord, type PoolMeta } from "@/api/registry";
 import { config } from "@/config";
 import type { DraftOrder, PoolState } from "@/types";
 
 type Status = "disconnected" | "connecting" | "connected" | "error";
+
+const vaultKey = (net: string) => `noctis.vault.${net}`;
 
 export function useNightPool() {
   const [status, setStatus] = useState<Status>("disconnected");
@@ -26,10 +30,15 @@ export function useNightPool() {
   const [busy, setBusy] = useState<string>();
   const [dust, setDust] = useState<{ balance: bigint; cap: bigint }>();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [vaultAddress, setVaultAddress] = useState<string>();
+  const [vaultBalance, setVaultBalance] = useState<bigint>(0n);
+  const [notes, setNotes] = useState<LocalNote[]>([]);
 
   const apiRef = useRef<NightPoolAPI | null>(null);
   const walletRef = useRef<ConnectedAPI | null>(null);
   const providersRef = useRef<ReturnType<typeof buildProviders> | null>(null);
+  const vaultProvidersRef = useRef<ReturnType<typeof buildVaultProviders> | null>(null);
+  const vaultApiRef = useRef<VaultAPI | null>(null);
   const networkRef = useRef<string>("");
   const addressRef = useRef<string>("");
   const subRef = useRef<Subscription | null>(null);
@@ -70,6 +79,15 @@ export function useNightPool() {
     setPools(await registry.list(networkRef.current));
   }, []);
 
+  // recompute the private balance + note list from the local store
+  const refreshNotes = useCallback(() => {
+    const net = networkRef.current;
+    const addr = addressRef.current;
+    if (!net || !addr) return;
+    setNotes(noteStore.unspent(net, addr));
+    setVaultBalance(noteStore.balance(net, addr));
+  }, []);
+
   const connect = useCallback(async () => {
     setStatus("connecting");
     setError(undefined);
@@ -87,13 +105,61 @@ export function useNightPool() {
         shielded.shieldedEncryptionPublicKey,
         networkId,
       );
+      vaultProvidersRef.current = buildVaultProviders(
+        api,
+        service,
+        shielded.shieldedCoinPublicKey,
+        shielded.shieldedEncryptionPublicKey,
+        networkId,
+      );
       setStatus("connected");
       setPools(await registry.list(networkId));
+      refreshNotes();
+
+      // rejoin a previously deployed vault on this network
+      const savedVault = localStorage.getItem(vaultKey(networkId));
+      if (savedVault) {
+        try {
+          vaultApiRef.current = await VaultAPI.join(vaultProvidersRef.current, savedVault);
+          setVaultAddress(savedVault);
+        } catch {
+          localStorage.removeItem(vaultKey(networkId));
+        }
+      }
     } catch (e) {
       setError((e as Error).message);
       setStatus("error");
     }
-  }, []);
+  }, [refreshNotes]);
+
+  const deployVault = useCallback(
+    () =>
+      run("deploying vault", async () => {
+        const v = await VaultAPI.deploy(vaultProvidersRef.current!);
+        vaultApiRef.current = v;
+        localStorage.setItem(vaultKey(networkRef.current), v.address);
+        setVaultAddress(v.address);
+      }),
+    [run],
+  );
+
+  const deposit = useCallback(
+    (amount: bigint) =>
+      run("depositing to vault", async () => {
+        await vaultApiRef.current!.deposit(networkRef.current, addressRef.current, amount);
+        refreshNotes();
+      }),
+    [run, refreshNotes],
+  );
+
+  const withdraw = useCallback(
+    (note: LocalNote, amount: bigint) =>
+      run("withdrawing from vault", async () => {
+        await vaultApiRef.current!.withdraw(networkRef.current, addressRef.current, note, amount);
+        refreshNotes();
+      }),
+    [run, refreshNotes],
+  );
 
   const openPool = useCallback(
     (rec: { address: string } & PoolMeta) =>
@@ -223,5 +289,12 @@ export function useNightPool() {
     settle,
     startNextBatch,
     claimAll,
+    // vault
+    vaultAddress,
+    vaultBalance,
+    notes,
+    deployVault,
+    deposit,
+    withdraw,
   };
 }

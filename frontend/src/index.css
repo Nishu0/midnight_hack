@@ -396,3 +396,5 @@ input[type="range"] { padding: 0; accent-color: var(--violet); cursor: pointer; 
 .guide-list .g-do b { color: var(--violet-2); text-transform: uppercase; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; margin-right: 4px; }
 .guide-list .g-get { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
 .guide-list .g-now { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--violet-2); align-self: center; }
+
+.vault-balance { font-size: clamp(34px, 6vw, 52px); background: linear-gradient(135deg, #fff, var(--buy)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; margin: 4px 0 2px; }

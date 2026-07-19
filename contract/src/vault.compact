@@ -1,0 +1,113 @@
+// noctis vault — shielded balance notes (zcash-style).
+// SPDX-License-Identifier: Apache-2.0
+//
+// a balance is a private note = (owner sk, amount, salt). the chain only ever sees
+// note commitments and spent nullifiers, never amounts or owners. deposit is public
+// (funds coming in); everything after is private. the "private balance" is the sum
+// of a user's unspent notes, computed client-side and never on-chain.
+
+pragma language_version >= 0.23;
+
+import CompactStandardLibrary;
+
+export struct Note {
+  amount: Uint<64>;
+  salt: Bytes<32>;
+}
+
+// public state
+export ledger noteCommitments: Set<Bytes<32>>; // h(sk, amount, salt)
+export ledger noteNullifiers: Set<Bytes<32>>;  // spent notes
+export ledger totalDeposited: Uint<64>;        // only public aggregate
+export ledger noteCount: Uint<64>;             // commitments ever created
+
+// witnesses (see vault-witnesses.ts). the frontend stages the exact note/salts for
+// each op, so it knows every new note's salt and can persist it locally.
+witness getSecretKey(): Bytes<32>;
+witness getVaultNote(): Note;      // the note being spent
+witness getNewSalt(): Bytes<32>;   // salt for the primary new note
+witness getChangeSalt(): Bytes<32>; // salt for the change note (split)
+witness getSplitAmount(): Uint<64>; // order-note amount (split)
+
+// ---- pure helpers (also called client-side) ----
+
+export circuit noteCommitment(sk: Bytes<32>, amount: Uint<64>, salt: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>([
+    pad(32, "noctis:note:"),
+    sk,
+    amount as Field as Bytes<32>,
+    salt
+  ]);
+}
+
+export circuit noteNullifier(sk: Bytes<32>, salt: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>([pad(32, "noctis:note:nul:"), sk, salt]);
+}
+
+constructor() {
+  totalDeposited = 0;
+  noteCount = 0;
+}
+
+// ---- circuits ----
+
+// deposit: amount is public (an on-chain transfer in). mint a private note for it.
+export circuit deposit(amount: Uint<64>): [] {
+  assert(disclose(amount) > 0, "Vault: amount must be positive");
+  const sk = getSecretKey();
+  const salt = getNewSalt();
+  const c = noteCommitment(sk, disclose(amount), salt);
+  assert(!noteCommitments.member(disclose(c)), "Vault: duplicate note");
+  noteCommitments.insert(disclose(c));
+  totalDeposited = (totalDeposited + disclose(amount)) as Uint<64>;
+  noteCount = (noteCount + 1) as Uint<64>;
+}
+
+// withdraw: spend a note, take `amount` out (public), mint a change note for the rest.
+export circuit withdraw(amount: Uint<64>): [] {
+  const note = getVaultNote();
+  const sk = getSecretKey();
+
+  const c = noteCommitment(sk, note.amount, note.salt);
+  assert(noteCommitments.member(disclose(c)), "Vault: unknown note");
+
+  const nul = noteNullifier(sk, note.salt);
+  assert(!noteNullifiers.member(disclose(nul)), "Vault: note already spent");
+  noteNullifiers.insert(disclose(nul));
+
+  const out = disclose(amount);
+  assert(note.amount >= out, "Vault: insufficient note balance");
+
+  const change = (note.amount - out) as Uint<64>;
+  const newSalt = getNewSalt();
+  const cc = noteCommitment(sk, change, newSalt);
+  noteCommitments.insert(disclose(cc));
+
+  totalDeposited = (totalDeposited - out) as Uint<64>;
+  noteCount = (noteCount + 1) as Uint<64>;
+}
+
+// splitNote: spend one note, mint two (order note + change note) that sum to it. the
+// amounts stay private — only commitments are public. this is the bridge to the pool:
+// the order note becomes an order's escrow.
+export circuit splitNote(): [] {
+  const note = getVaultNote();
+  const sk = getSecretKey();
+
+  const c = noteCommitment(sk, note.amount, note.salt);
+  assert(noteCommitments.member(disclose(c)), "Vault: unknown note");
+
+  const nul = noteNullifier(sk, note.salt);
+  assert(!noteNullifiers.member(disclose(nul)), "Vault: note already spent");
+  noteNullifiers.insert(disclose(nul));
+
+  const orderAmt = getSplitAmount();
+  assert(note.amount >= orderAmt, "Vault: split exceeds note");
+  const change = (note.amount - orderAmt) as Uint<64>;
+
+  const orderSalt = getNewSalt();
+  const changeSalt = getChangeSalt();
+  noteCommitments.insert(disclose(noteCommitment(sk, orderAmt, orderSalt)));
+  noteCommitments.insert(disclose(noteCommitment(sk, change, changeSalt)));
+  noteCount = (noteCount + 2) as Uint<64>;
+}

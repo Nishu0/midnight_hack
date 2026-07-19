@@ -7,12 +7,13 @@ import { Onboarding } from "@/components/Onboarding";
 import { PoolsList } from "@/components/PoolsList";
 import { CreatePool } from "@/components/CreatePool";
 import { PoolPage } from "@/components/PoolPage";
+import { VaultPanel } from "@/components/VaultPanel";
 
 const SEEN_KEY = "nightpool.onboarded";
 
 export default function App() {
   const np = useNightPool();
-  const [view, setView] = useState<"pools" | "create">("pools");
+  const [view, setView] = useState<"pools" | "create" | "vault">("pools");
   const [tour, setTour] = useState(false);
 
   const connected = np.status === "connected";
@@ -62,6 +63,7 @@ export default function App() {
           pools={np.pools}
           busy={np.busy}
           onCreate={() => setView("create")}
+          onVault={() => setView("vault")}
           onOpen={(rec) => np.openPool(rec)}
           onOpenAddress={(address) => np.openPool({ address })}
           onRefresh={np.refreshPools}
@@ -70,6 +72,19 @@ export default function App() {
 
       {connected && !inPool && view === "create" && (
         <CreatePool busy={np.busy} dust={np.dust} onBack={() => setView("pools")} onDeploy={np.createPool} />
+      )}
+
+      {connected && !inPool && view === "vault" && (
+        <VaultPanel
+          vaultAddress={np.vaultAddress}
+          vaultBalance={np.vaultBalance}
+          notes={np.notes}
+          busy={np.busy}
+          onBack={() => setView("pools")}
+          onDeploy={np.deployVault}
+          onDeposit={np.deposit}
+          onWithdraw={np.withdraw}
+        />
       )}
 
       {tour && <Onboarding onClose={() => setTour(false)} />}
