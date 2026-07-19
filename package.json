@@ -36,6 +36,11 @@
   "pnpm": {
     "overrides": {
       "@midnight-ntwrk/ledger-v8": "8.1.0"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "classic-level",
+      "msgpackr-extract"
+    ]
   }
 }
