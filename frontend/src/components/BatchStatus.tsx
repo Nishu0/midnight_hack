@@ -7,10 +7,12 @@ type Props = {
   pool?: PoolState;
   busy?: string;
   onReveal: () => void;
+  onForceReveal: () => void;
   onSettle: () => void;
+  onStartNextBatch: () => void;
 };
 
-export function BatchStatus({ pool, busy, onReveal, onSettle }: Props) {
+export function BatchStatus({ pool, busy, onReveal, onForceReveal, onSettle, onStartNextBatch }: Props) {
   if (!pool) return null;
   const step = phaseStep[pool.phase];
   const remaining = Number(BigInt(BATCH_SIZE) - pool.committedCount);
@@ -55,18 +57,38 @@ export function BatchStatus({ pool, busy, onReveal, onSettle }: Props) {
       {pool.phase === "commit" && (
         <p className="hint">
           {remaining > 0
-            ? `commit ${remaining} more order${remaining === 1 ? "" : "s"} to fill the batch and open reveal.`
+            ? `commit ${remaining} more order${remaining === 1 ? "" : "s"} to fill the batch, or open reveal now.`
             : "batch full — opening reveal."}
         </p>
       )}
+      {pool.phase === "settled" && <p className="hint">batch settled. claim your fills, then start the next batch.</p>}
 
       <div className="actions">
-        <button className="btn" disabled={pool.phase !== "reveal" || !!busy} onClick={onReveal}>
-          reveal my orders
-        </button>
-        <button className="btn" disabled={pool.phase !== "reveal" || !!busy} onClick={onSettle}>
-          settle batch
-        </button>
+        {pool.phase === "commit" && (
+          <button
+            className="btn"
+            disabled={pool.committedCount === 0n || !!busy}
+            onClick={onForceReveal}
+            title="liveness: anyone can open reveal even before the batch is full"
+          >
+            open reveal now
+          </button>
+        )}
+        {pool.phase === "reveal" && (
+          <>
+            <button className="btn" disabled={!!busy} onClick={onReveal}>
+              reveal my orders
+            </button>
+            <button className="btn primary" disabled={!!busy} onClick={onSettle}>
+              settle batch
+            </button>
+          </>
+        )}
+        {pool.phase === "settled" && (
+          <button className="btn primary" disabled={!!busy} onClick={onStartNextBatch}>
+            start next batch
+          </button>
+        )}
       </div>
     </section>
   );

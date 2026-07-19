@@ -43,4 +43,12 @@ export const witnesses = {
     NightPoolPrivateState,
     Uint8Array,
   ] => [privateState, privateState.secretKey],
+
+  // floor(a / b); the circuit re-verifies q*b <= a < (q+1)*b, so this is trusted only
+  // to be the correct quotient, never for soundness.
+  divFloor: (
+    { privateState }: WitnessContext<Ledger, NightPoolPrivateState>,
+    a: bigint,
+    b: bigint,
+  ): [NightPoolPrivateState, bigint] => [privateState, b === 0n ? 0n : a / b],
 };

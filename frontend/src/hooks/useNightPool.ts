@@ -151,7 +151,23 @@ export function useNightPool() {
     [run, orders],
   );
 
+  const cancel = useCallback(
+    (order: Order) =>
+      run("cancelling order", async () => {
+        await apiRef.current!.cancel(order);
+        setOrders((prev) => prev.filter((o) => o !== order));
+      }),
+    [run],
+  );
+
+  const forceReveal = useCallback(() => run("opening reveal", () => apiRef.current!.forceReveal()), [run]);
+
   const settle = useCallback(() => run("settling batch", () => apiRef.current!.settle()), [run]);
+
+  const startNextBatch = useCallback(
+    () => run("starting next batch", () => apiRef.current!.startNextBatch()),
+    [run],
+  );
 
   const claimAll = useCallback(
     () =>
@@ -201,8 +217,11 @@ export function useNightPool() {
     openPool,
     closePool,
     commit,
+    cancel,
     revealAll,
+    forceReveal,
     settle,
+    startNextBatch,
     claimAll,
   };
 }

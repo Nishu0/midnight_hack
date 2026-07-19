@@ -1,5 +1,6 @@
-// deploy/join + call wiring for the nightpool contract. one method per circuit;
+// deploy/join + call wiring for the noctis contract. one method per circuit;
 // midnight.js handles proof generation (via the proof server) and submission.
+// commitments are namespaced by the current on-chain batchId.
 
 import { map, type Observable } from "rxjs";
 import { CompiledContract } from "@midnight-ntwrk/compact-js";
@@ -17,7 +18,6 @@ const compiled = CompiledContract.make("nightpool", NightPool.Contract).pipe(
 
 const randomBytes = (n: number): Uint8Array => crypto.getRandomValues(new Uint8Array(n));
 
-// a per user secret key, persisted so commitments/claims stay linkable locally
 const loadSecretKey = (): Uint8Array => {
   const stored = localStorage.getItem("nightpool.sk");
   if (stored) return Uint8Array.from(atob(stored), (c) => c.charCodeAt(0));
@@ -36,8 +36,15 @@ const draftToOrder = (draft: DraftOrder): Order => ({
 const phaseName = (p: NightPool.Phase): PhaseName =>
   p === NightPool.Phase.COMMIT ? "commit" : p === NightPool.Phase.REVEAL ? "reveal" : "settled";
 
-const readTickMap = (m: { member: (k: bigint) => boolean; lookup: (k: bigint) => bigint }): bigint[] =>
-  Array.from({ length: 16 }, (_, i) => (m.member(BigInt(i)) ? m.lookup(BigInt(i)) : 0n));
+// demand/supply are namespaced by tickKey(batchId, tick); recompute the keys to read
+const readTickMap = (
+  m: { member: (k: Uint8Array) => boolean; lookup: (k: Uint8Array) => bigint },
+  bid: bigint,
+): bigint[] =>
+  Array.from({ length: 16 }, (_, i) => {
+    const k = NightPool.pureCircuits.tickKey(bid, BigInt(i));
+    return m.member(k) ? m.lookup(k) : 0n;
+  });
 
 const flattenLedger = (l: NightPool.Ledger): PoolState => ({
   phase: phaseName(l.phase),
@@ -46,8 +53,11 @@ const flattenLedger = (l: NightPool.Ledger): PoolState => ({
   revealedCount: l.revealedCount,
   clearingTick: l.clearingTick,
   clearedVolume: l.clearedVolume,
-  demand: readTickMap(l.demand),
-  supply: readTickMap(l.supply),
+  totalBuyVolume: l.totalBuyVolume,
+  totalSellVolume: l.totalSellVolume,
+  feesAccrued: l.feesAccrued,
+  demand: readTickMap(l.demand, l.batchId),
+  supply: readTickMap(l.supply, l.batchId),
 });
 
 type Deployed =
@@ -82,7 +92,13 @@ export class NightPoolAPI {
     return new NightPoolAPI(address, deployed, providers);
   }
 
-  // stage the order locally so the witness functions can hand it to the proof
+  // current on-chain batch id, used to namespace commitments
+  private async currentBatchId(): Promise<bigint> {
+    const st = await this.providers.publicDataProvider.queryContractState(this.address);
+    if (!st) throw new Error("pool state unavailable");
+    return NightPool.ledger(st.data).batchId;
+  }
+
   private async stage(order: Order): Promise<void> {
     const prev =
       (await this.providers.privateStateProvider.get(NIGHTPOOL_PRIVATE_STATE_ID)) ??
@@ -90,19 +106,27 @@ export class NightPoolAPI {
     await this.providers.privateStateProvider.set(NIGHTPOOL_PRIVATE_STATE_ID, withOrder(prev, order));
   }
 
-  // commit: seal the order to a hash and publish only that
   async commit(draft: DraftOrder): Promise<Order> {
+    const bid = await this.currentBatchId();
     const order = draftToOrder(draft);
     await this.stage(order);
-    const commitment = NightPool.pureCircuits.orderCommitment(order, this.secretKey);
+    const commitment = NightPool.pureCircuits.orderCommitment(order, this.secretKey, bid);
     await this.deployed.callTx.commitOrder(commitment);
     return order;
   }
 
-  // reveal the previously committed order (must still be staged locally)
+  async cancel(order: Order): Promise<void> {
+    await this.stage(order);
+    await this.deployed.callTx.cancelOrder();
+  }
+
   async reveal(order: Order): Promise<void> {
     await this.stage(order);
     await this.deployed.callTx.revealOrder();
+  }
+
+  async forceReveal(): Promise<void> {
+    await this.deployed.callTx.forceReveal();
   }
 
   async settle(): Promise<void> {
@@ -114,7 +138,10 @@ export class NightPoolAPI {
     await this.deployed.callTx.claim();
   }
 
-  // live public state, driven by the indexer
+  async startNextBatch(): Promise<void> {
+    await this.deployed.callTx.startNextBatch();
+  }
+
   state$(): Observable<PoolState> {
     return this.providers.publicDataProvider
       .contractStateObservable(this.address, { type: "latest" })

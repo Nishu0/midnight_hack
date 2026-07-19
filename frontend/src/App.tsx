@@ -48,8 +48,11 @@ export default function App() {
           busy={np.busy}
           onBack={np.closePool}
           onCommit={np.commit}
+          onCancel={np.cancel}
           onReveal={np.revealAll}
+          onForceReveal={np.forceReveal}
           onSettle={np.settle}
+          onStartNextBatch={np.startNextBatch}
           onClaim={np.claimAll}
         />
       )}

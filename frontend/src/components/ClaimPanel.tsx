@@ -7,17 +7,19 @@ type Props = {
   myOrders: Order[];
   busy?: string;
   onClaim: () => void;
+  onCancel: (o: Order) => void;
 };
 
-export function ClaimPanel({ pool, myOrders, busy, onClaim }: Props) {
+export function ClaimPanel({ pool, myOrders, busy, onClaim, onCancel }: Props) {
   if (!pool) return null;
   const settled = pool.phase === "settled";
+  const canCancel = pool.phase === "commit";
   const clearing = Number(pool.clearingTick);
 
   return (
     <section className="card rise">
       <div className="eyebrow">step 4 · claim</div>
-      <h2>claim proceeds</h2>
+      <h2>your orders</h2>
       <p className="hint">withdraw fills via a nullifier, unlinkable to your commitment.</p>
 
       <ul className="orders">
@@ -29,6 +31,11 @@ export function ClaimPanel({ pool, myOrders, busy, onClaim }: Props) {
             <li key={i}>
               <span className={buy ? "buy" : "sell"}>{buy ? "buy" : "sell"}</span>
               {o.amount.toString()} @ tick {o.limitTick.toString()} ({tickToPrice(Number(o.limitTick)).toFixed(3)})
+              {canCancel && (
+                <button className="linklike" disabled={!!busy} onClick={() => onCancel(o)}>
+                  cancel
+                </button>
+              )}
               {settled && <em>{pool.clearedVolume === 0n ? "refund" : eligible ? "filled" : "unfilled"}</em>}
             </li>
           );

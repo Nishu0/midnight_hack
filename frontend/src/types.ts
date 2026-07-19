@@ -20,6 +20,9 @@ export type PoolState = {
   revealedCount: bigint;
   clearingTick: bigint;
   clearedVolume: bigint;
+  totalBuyVolume: bigint;
+  totalSellVolume: bigint;
+  feesAccrued: bigint;
   demand: bigint[]; // indexed by tick
   supply: bigint[];
 };

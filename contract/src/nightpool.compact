@@ -1,25 +1,26 @@
-// nightpool — sealed-bid batch auction dex on midnight
+// noctis — sealed-bid batch auction dex on midnight
 // SPDX-License-Identifier: Apache-2.0
 //
 // trades clear in discrete batches at one uniform price. orders are committed as
 // hashes, revealed via zk proof, and settled together. no ordering within a batch
 // so no front-running or sandwiching. individual sizes/prices stay private; only
 // the clearing price and aggregate per-tick volumes are public.
+//
+// this version runs many batches: everything is namespaced by batchId, so old
+// commitments/nullifiers/curves can never replay into a new batch. fills are
+// pro-rata at the marginal tick, so payouts conserve volume.
 
 pragma language_version >= 0.23;
 
 import CompactStandardLibrary;
 
-// batch lifecycle, one direction only
 export enum Phase {
   COMMIT,
   REVEAL,
   SETTLED
 }
 
-// private order, lives in the trader's witness state until reveal.
-// side 0 = buy, 1 = sell. limitTick indexes the fixed 0..15 price grid:
-// a buy fills at any clearing tick <= limit, a sell at any tick >= limit.
+// private order (side 0 = buy, 1 = sell). limitTick indexes the 0..15 grid.
 export struct Order {
   side: Uint<8>;
   amount: Uint<64>;
@@ -29,47 +30,61 @@ export struct Order {
 
 // public state
 export ledger phase: Phase;
-export ledger batchId: Counter;
+export ledger batchId: Uint<64>;             // current batch, namespaces everything
 
-export ledger commitments: Set<Bytes<32>>;
+export ledger commitments: Set<Bytes<32>>;   // per-batch, folded with batchId
+export ledger nullifiers: Set<Bytes<32>>;    // spent reveal nullifiers
+export ledger cancelled: Set<Bytes<32>>;     // cancelled-order nullifiers
+export ledger claimed: Set<Bytes<32>>;       // spent claim nullifiers
 export ledger committedCount: Uint<8>;
 export ledger revealedCount: Uint<8>;
 
-// aggregate curves by price tick. demand[p]/supply[p] = volume willing to trade
-// at clearing tick p. only aggregates are public, never per-order buckets.
-export ledger demand: Map<Uint<8>, Uint<64>>;
-export ledger supply: Map<Uint<8>, Uint<64>>;
+// aggregate curves keyed by tickKey(batchId, tick). demand[k]/supply[k] = volume
+// eligible to trade at that tick. only aggregates are public, never per-order rows.
+export ledger demand: Map<Bytes<32>, Uint<64>>;
+export ledger supply: Map<Bytes<32>, Uint<64>>;
 
-// spent reveal nullifiers, one reveal per order
-export ledger nullifiers: Set<Bytes<32>>;
-
-export ledger clearingTick: Uint<8>;   // 0 also means no cross
+export ledger clearingTick: Uint<8>;         // 0 also means no cross
 export ledger clearedVolume: Uint<64>;
-export ledger clearingSpread: Uint<64>; // |demand - supply| at the clearing tick
+export ledger clearingSpread: Uint<64>;
 
-// running aggregates (public, per current batch)
+// running aggregates for the current batch + cumulative across settles
 export ledger totalBuyVolume: Uint<64>;
 export ledger totalSellVolume: Uint<64>;
-export ledger totalCleared: Uint<64>;   // cumulative matched across settles
+export ledger totalCleared: Uint<64>;
 
-// flat protocol fee taken per filled order at claim time, and what's accrued
+// flat protocol fee per filled order, and what's accrued
 export ledger protocolFee: Uint<64>;
 export ledger feesAccrued: Uint<64>;
 
-// claim bookkeeping
-export ledger filled: Map<Bytes<32>, Uint<64>>;
-export ledger claimed: Set<Bytes<32>>;
+// claim bookkeeping (base + quote legs)
+export ledger filledBase: Map<Bytes<32>, Uint<64>>;
+export ledger filledQuote: Map<Bytes<32>, Uint<64>>;
 
 // witnesses (see witnesses.ts)
 witness getOrder(): Order;
 witness getSecretKey(): Bytes<32>;
+// floor((a)/(b)) computed off-chain, verified on-chain (compact has no int division)
+witness divFloor(a: Uint<128>, b: Uint<64>): Uint<64>;
 
-// tick grid = 16, batch size = 2. the reveal/settle loops below are fixed at 16.
+// grid = 16 ticks, batch size = 2. price(tick) = 0.5 + tick*0.1, scaled by 1e6.
 
-// commitment = h(sk, side, amount, limitTick, salt): binding + hiding
-export circuit orderCommitment(o: Order, sk: Bytes<32>): Bytes<32> {
-  return persistentHash<Vector<5, Bytes<32>>>([
+// ---- pure helpers (also called client-side) ----
+
+// per-batch tick key so a new batch starts from empty curves without clearing maps
+export circuit tickKey(bid: Uint<64>, tick: Uint<8>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>([
+    pad(32, "noctis:tick:"),
+    bid as Field as Bytes<32>,
+    tick as Field as Bytes<32>
+  ]);
+}
+
+// commitment binds the order to the trader and the batch
+export circuit orderCommitment(o: Order, sk: Bytes<32>, bid: Uint<64>): Bytes<32> {
+  return persistentHash<Vector<6, Bytes<32>>>([
     sk,
+    bid as Field as Bytes<32>,
     o.side as Field as Bytes<32>,
     o.amount as Field as Bytes<32>,
     o.limitTick as Field as Bytes<32>,
@@ -77,26 +92,26 @@ export circuit orderCommitment(o: Order, sk: Bytes<32>): Bytes<32> {
   ]);
 }
 
-// reveal nullifier, domain-separated from the claim one
-export circuit revealNullifier(o: Order, sk: Bytes<32>): Bytes<32> {
-  return persistentHash<Vector<3, Bytes<32>>>([
-    pad(32, "nightpool:reveal:"),
-    sk,
-    o.salt
-  ]);
+export circuit revealNullifier(o: Order, sk: Bytes<32>, bid: Uint<64>): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>([pad(32, "noctis:reveal:"), bid as Field as Bytes<32>, sk, o.salt]);
 }
 
-// claim nullifier, unlinkable to the commitment
-export circuit claimNullifier(o: Order, sk: Bytes<32>): Bytes<32> {
-  return persistentHash<Vector<3, Bytes<32>>>([
-    pad(32, "nightpool:claim:"),
-    sk,
-    o.salt
-  ]);
+export circuit claimNullifier(o: Order, sk: Bytes<32>, bid: Uint<64>): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>([pad(32, "noctis:claim:"), bid as Field as Bytes<32>, sk, o.salt]);
+}
+
+export circuit cancelNullifier(o: Order, sk: Bytes<32>, bid: Uint<64>): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>([pad(32, "noctis:cancel:"), bid as Field as Bytes<32>, sk, o.salt]);
+}
+
+// price of a tick scaled by 1e6: 0.5 -> 2.0 in 0.1 steps
+export circuit tickPriceScaled(tick: Uint<8>): Uint<64> {
+  return (500000 + (tick as Uint<64>) * 100000) as Uint<64>;
 }
 
 constructor() {
   phase = Phase.COMMIT;
+  batchId = 1;
   committedCount = 0;
   revealedCount = 0;
   clearingTick = 0;
@@ -105,15 +120,16 @@ constructor() {
   totalBuyVolume = 0;
   totalSellVolume = 0;
   totalCleared = 0;
-  protocolFee = 1;   // flat fee per filled order, in base units
+  protocolFee = 1;
   feesAccrued = 0;
-  batchId.increment(1);
 }
 
-// commit phase: publish just the hash. opens reveals once the batch fills (2).
+// ---- circuits ----
+
+// commit phase: publish just the hash. opens reveal once the batch fills (2).
 export circuit commitOrder(commitment: Bytes<32>): [] {
-  assert(phase == Phase.COMMIT, "NightPool: not in commit phase");
-  assert(!commitments.member(disclose(commitment)), "NightPool: duplicate commitment");
+  assert(phase == Phase.COMMIT, "Noctis: not in commit phase");
+  assert(!commitments.member(disclose(commitment)), "Noctis: duplicate commitment");
   commitments.insert(disclose(commitment));
   committedCount = (committedCount + 1) as Uint<8>;
   if (committedCount >= 2) {
@@ -121,66 +137,89 @@ export circuit commitOrder(commitment: Bytes<32>): [] {
   }
 }
 
-// reveal phase: prove the order hashes to a live commitment, then fold its
-// amount into the aggregate curves. only the buckets + a nullifier go public.
+// cancel a still-sealed order before reveal opens. marks a cancel nullifier so the
+// order can't later be revealed, and frees a slot in the batch.
+export circuit cancelOrder(): [] {
+  assert(phase == Phase.COMMIT, "Noctis: can only cancel during commit");
+  const o = getOrder();
+  const sk = getSecretKey();
+  const commitment = orderCommitment(o, sk, batchId);
+  assert(commitments.member(disclose(commitment)), "Noctis: unknown commitment");
+  const xnul = cancelNullifier(o, sk, batchId);
+  assert(!cancelled.member(disclose(xnul)), "Noctis: already cancelled");
+  cancelled.insert(disclose(xnul));
+  assert(committedCount > 0, "Noctis: nothing to cancel");
+  committedCount = (committedCount - 1) as Uint<8>;
+}
+
+// liveness: anyone can open reveal even before the batch is full, so a missing
+// committer can't stall it forever.
+export circuit forceReveal(): [] {
+  assert(phase == Phase.COMMIT, "Noctis: not in commit phase");
+  assert(committedCount > 0, "Noctis: no commitments yet");
+  phase = Phase.REVEAL;
+}
+
+// reveal phase: prove the order hashes to a live commitment, wasn't cancelled, and
+// fold its amount into the aggregate curves for this batch.
 export circuit revealOrder(): [] {
-  assert(phase == Phase.REVEAL, "NightPool: not in reveal phase");
+  assert(phase == Phase.REVEAL, "Noctis: not in reveal phase");
 
   const o = getOrder();
   const sk = getSecretKey();
 
-  const commitment = orderCommitment(o, sk);
-  assert(commitments.member(disclose(commitment)), "NightPool: unknown commitment");
+  const commitment = orderCommitment(o, sk, batchId);
+  assert(commitments.member(disclose(commitment)), "Noctis: unknown commitment");
 
-  const nul = revealNullifier(o, sk);
-  assert(!nullifiers.member(disclose(nul)), "NightPool: order already revealed");
+  const xnul = cancelNullifier(o, sk, batchId);
+  assert(!cancelled.member(disclose(xnul)), "Noctis: order was cancelled");
+
+  const nul = revealNullifier(o, sk, batchId);
+  assert(!nullifiers.member(disclose(nul)), "Noctis: order already revealed");
   nullifiers.insert(disclose(nul));
 
   const t = disclose(o.limitTick);
   const amt = disclose(o.amount);
   const isBuy = disclose(o.side) == 0;
 
-  // input validation
-  assert(amt > 0, "NightPool: amount must be positive");
-  assert(t < 16, "NightPool: limit tick out of range");
+  assert(amt > 0, "Noctis: amount must be positive");
+  assert(t < 16, "Noctis: limit tick out of range");
 
-  // running public aggregates for this batch
   if (isBuy) {
     totalBuyVolume = (totalBuyVolume + amt) as Uint<64>;
   } else {
     totalSellVolume = (totalSellVolume + amt) as Uint<64>;
   }
 
-  // touch every tick each reveal (uniform writes). buy adds to demand[p] for
-  // p <= limit, sell adds to supply[p] for p >= limit.
+  // buy adds to demand[p] for p <= limit; sell adds to supply[p] for p >= limit
   for (const p of 0..16) {
     const pt = p as Uint<8>;
-    const dPrev = demand.member(pt) ? demand.lookup(pt) : 0 as Uint<64>;
-    const sPrev = supply.member(pt) ? supply.lookup(pt) : 0 as Uint<64>;
+    const k = tickKey(batchId, pt);
+    const dPrev = demand.member(k) ? demand.lookup(k) : 0 as Uint<64>;
+    const sPrev = supply.member(k) ? supply.lookup(k) : 0 as Uint<64>;
     const dAdd = (isBuy && (pt <= t)) ? amt : 0 as Uint<64>;
     const sAdd = ((!isBuy) && (pt >= t)) ? amt : 0 as Uint<64>;
-    demand.insert(pt, (dPrev + dAdd) as Uint<64>);
-    supply.insert(pt, (sPrev + sAdd) as Uint<64>);
+    demand.insert(k, (dPrev + dAdd) as Uint<64>);
+    supply.insert(k, (sPrev + sAdd) as Uint<64>);
   }
 
   revealedCount = (revealedCount + 1) as Uint<8>;
 }
 
-// settle: fixed 16-tick scan, pick the tick maximizing min(demand, supply).
-// no per-order ordering is consulted, so there's nothing to front-run.
+// settle: fixed 16-tick scan; pick the tick with the most matched volume, breaking
+// ties toward the tightest cross (fairest single price).
 export circuit settleBatch(): [] {
-  assert(phase == Phase.REVEAL, "NightPool: not in reveal phase");
+  assert(phase == Phase.REVEAL, "Noctis: not in reveal phase");
 
   clearingTick = 0;
   clearedVolume = 0;
   clearingSpread = 0;
 
-  // pick the tick with the most matched volume; break ties toward the tightest
-  // cross (smallest |demand - supply|), which is the fairest single price.
   for (const p of 0..16) {
     const pt = p as Uint<8>;
-    const d = demand.member(pt) ? demand.lookup(pt) : 0 as Uint<64>;
-    const s = supply.member(pt) ? supply.lookup(pt) : 0 as Uint<64>;
+    const k = tickKey(batchId, pt);
+    const d = demand.member(k) ? demand.lookup(k) : 0 as Uint<64>;
+    const s = supply.member(k) ? supply.lookup(k) : 0 as Uint<64>;
     const matched = d < s ? d : s;
     const spread = d > s ? (d - s) as Uint<64> : (s - d) as Uint<64>;
     const better = (matched > clearedVolume)
@@ -196,36 +235,77 @@ export circuit settleBatch(): [] {
   phase = Phase.SETTLED;
 }
 
-// claim: prove order ownership and withdraw. eligible if the limit crosses the
-// clearing tick; if the batch never crossed everyone is refunded in full.
+// claim: prove order ownership and withdraw. pro-rata at the marginal tick so the
+// side in excess is scaled down to exactly the matched volume. computes both legs.
 export circuit claim(): [] {
-  assert(phase == Phase.SETTLED, "NightPool: batch not settled");
+  assert(phase == Phase.SETTLED, "Noctis: batch not settled");
 
   const o = getOrder();
   const sk = getSecretKey();
 
-  const commitment = orderCommitment(o, sk);
-  assert(commitments.member(disclose(commitment)), "NightPool: unknown commitment");
+  const commitment = orderCommitment(o, sk, batchId);
+  assert(commitments.member(disclose(commitment)), "Noctis: unknown commitment");
 
-  const cnul = claimNullifier(o, sk);
-  assert(!claimed.member(disclose(cnul)), "NightPool: already claimed");
+  // must have been revealed (unrevealed orders never contributed, so can't be filled)
+  const rnul = revealNullifier(o, sk, batchId);
+  assert(nullifiers.member(disclose(rnul)), "Noctis: order was not revealed");
+
+  const cnul = claimNullifier(o, sk, batchId);
+  assert(!claimed.member(disclose(cnul)), "Noctis: already claimed");
 
   const side = disclose(o.side);
   const limit = disclose(o.limitTick);
   const amt = disclose(o.amount);
 
-  const eligible = side == 0
-    ? (limit >= clearingTick)
-    : (limit <= clearingTick);
+  const eligible = side == 0 ? (limit >= clearingTick) : (limit <= clearingTick);
   const noCross = clearedVolume == 0;
   const filledOrder = eligible && !noCross;
 
-  // refund in full on no-cross; on a real fill, take the flat protocol fee
-  const gross = (noCross || eligible) ? amt : 0 as Uint<64>;
-  const fee = (filledOrder && (gross >= protocolFee)) ? protocolFee : 0 as Uint<64>;
-  const payout = (gross - fee) as Uint<64>;
-  feesAccrued = (feesAccrued + fee) as Uint<64>;
+  // eligible volume on this order's side at the clearing tick (pro-rata denominator)
+  const k = tickKey(batchId, clearingTick);
+  const sideTotal = side == 0
+    ? (demand.member(k) ? demand.lookup(k) : 0 as Uint<64>)
+    : (supply.member(k) ? supply.lookup(k) : 0 as Uint<64>);
+
+  // base payout: full amount refunded on no-cross; pro-rata share on a real fill.
+  // share = amt * clearedVolume / sideTotal, verified (compact has no int division).
+  const denom = (sideTotal > 0 ? sideTotal : 1) as Uint<64>;
+  const num = amt * clearedVolume;                        // Uint<128>
+  const q = divFloor(num, denom);                         // Uint<64>
+  assert((q * denom) <= num, "Noctis: div low");
+  assert(num < ((q + 1) * denom), "Noctis: div high");
+  const share = eligible ? q : 0 as Uint<64>;
+  const baseGross = disclose((noCross ? amt : share) as Uint<64>);
+
+  const fee = (filledOrder && (baseGross >= protocolFee)) ? protocolFee : 0 as Uint<64>;
+  const baseNet = (baseGross - fee) as Uint<64>;
+  feesAccrued = (feesAccrued + disclose(fee)) as Uint<64>;
+
+  // quote leg = baseNet * price(clearingTick) / 1e6, verified. only on a fill.
+  const price = tickPriceScaled(clearingTick);
+  const qnum = baseNet * price;                           // Uint<128>
+  const scale = 1000000 as Uint<64>;
+  const qq = divFloor(qnum, scale);                       // Uint<64>
+  assert((qq * scale) <= qnum, "Noctis: qdiv low");
+  assert(qnum < ((qq + 1) * scale), "Noctis: qdiv high");
+  const quoteOut = (filledOrder ? qq : 0) as Uint<64>;
 
   claimed.insert(disclose(cnul));
-  filled.insert(disclose(cnul), payout);
+  filledBase.insert(disclose(cnul), disclose(baseNet));
+  filledQuote.insert(disclose(cnul), disclose(quoteOut));
+}
+
+// start the next batch once settled: bump batchId (which re-namespaces everything),
+// reset per-batch counters and clearing state, back to commit.
+export circuit startNextBatch(): [] {
+  assert(phase == Phase.SETTLED, "Noctis: current batch not settled");
+  batchId = (batchId + 1) as Uint<64>;
+  committedCount = 0;
+  revealedCount = 0;
+  clearingTick = 0;
+  clearedVolume = 0;
+  clearingSpread = 0;
+  totalBuyVolume = 0;
+  totalSellVolume = 0;
+  phase = Phase.COMMIT;
 }

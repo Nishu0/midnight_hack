@@ -15,8 +15,11 @@ type Props = {
   busy?: string;
   onBack: () => void;
   onCommit: (d: DraftOrder) => void;
+  onCancel: (o: Order) => void;
   onReveal: () => void;
+  onForceReveal: () => void;
   onSettle: () => void;
+  onStartNextBatch: () => void;
   onClaim: () => void;
 };
 
@@ -40,10 +43,17 @@ export function PoolPage(p: Props) {
       <main className="grid">
         <div className="col-left">
           <OrderForm disabled={!canCommit} onCommit={p.onCommit} />
-          <ClaimPanel pool={p.pool} myOrders={p.myOrders} busy={p.busy} onClaim={p.onClaim} />
+          <ClaimPanel pool={p.pool} myOrders={p.myOrders} busy={p.busy} onClaim={p.onClaim} onCancel={p.onCancel} />
         </div>
         <div className="col-right">
-          <BatchStatus pool={p.pool} busy={p.busy} onReveal={p.onReveal} onSettle={p.onSettle} />
+          <BatchStatus
+            pool={p.pool}
+            busy={p.busy}
+            onReveal={p.onReveal}
+            onForceReveal={p.onForceReveal}
+            onSettle={p.onSettle}
+            onStartNextBatch={p.onStartNextBatch}
+          />
           <DepthChart pool={p.pool} />
           <Guide pool={p.pool} />
           <div className="meta">pool · {p.address}</div>
