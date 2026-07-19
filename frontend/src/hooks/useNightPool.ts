@@ -13,6 +13,10 @@ import type { DraftOrder, PoolState } from "@/types";
 
 type Status = "disconnected" | "connecting" | "connected" | "error";
 
+// remember the deployed pool per network so a refresh rejoins it instead of
+// asking to deploy again
+const poolKey = (net: string) => `nightpool.pool.${net}`;
+
 export function useNightPool() {
   const [status, setStatus] = useState<Status>("disconnected");
   const [address, setAddress] = useState<string>();
@@ -25,33 +29,12 @@ export function useNightPool() {
 
   const apiRef = useRef<NightPoolAPI | null>(null);
   const walletRef = useRef<ConnectedAPI | null>(null);
+  const networkRef = useRef<string>("");
   const subRef = useRef<Subscription | null>(null);
   // remember our own committed orders so we can reveal/claim them later
   const myOrders = useRef<Order[]>([]);
 
   const providersRef = useRef<ReturnType<typeof buildProviders> | null>(null);
-
-  const connect = useCallback(async () => {
-    setStatus("connecting");
-    setError(undefined);
-    try {
-      const { api, service, shielded, networkId } = await connectWallet(config.networkId);
-      walletRef.current = api;
-      setAddress(shielded.shieldedAddress);
-      setNetwork(networkId);
-      providersRef.current = buildProviders(
-        api,
-        service,
-        shielded.shieldedCoinPublicKey,
-        shielded.shieldedEncryptionPublicKey,
-        networkId,
-      );
-      setStatus("connected");
-    } catch (e) {
-      setError((e as Error).message);
-      setStatus("error");
-    }
-  }, []);
 
   const subscribe = useCallback((api: NightPoolAPI) => {
     subRef.current?.unsubscribe();
@@ -60,6 +43,43 @@ export function useNightPool() {
       error: (e: Error) => setError(e.message),
     });
   }, []);
+
+  const connect = useCallback(async () => {
+    setStatus("connecting");
+    setError(undefined);
+    try {
+      const { api, service, shielded, networkId } = await connectWallet(config.networkId);
+      walletRef.current = api;
+      networkRef.current = networkId;
+      setAddress(shielded.shieldedAddress);
+      setNetwork(networkId);
+      const providers = buildProviders(
+        api,
+        service,
+        shielded.shieldedCoinPublicKey,
+        shielded.shieldedEncryptionPublicKey,
+        networkId,
+      );
+      providersRef.current = providers;
+      setStatus("connected");
+
+      // rejoin a previously deployed pool on this network, if any
+      const saved = localStorage.getItem(poolKey(networkId));
+      if (saved) {
+        try {
+          const pool = await NightPoolAPI.join(providers, saved);
+          apiRef.current = pool;
+          setContractAddress(pool.address);
+          subscribe(pool);
+        } catch {
+          localStorage.removeItem(poolKey(networkId)); // stale address, fall back to setup
+        }
+      }
+    } catch (e) {
+      setError((e as Error).message);
+      setStatus("error");
+    }
+  }, [subscribe]);
 
   const run = useCallback(async (label: string, fn: () => Promise<void>) => {
     setBusy(label);
@@ -102,6 +122,7 @@ export function useNightPool() {
       run("deploying pool", async () => {
         const api = await NightPoolAPI.deploy(providersRef.current!);
         apiRef.current = api;
+        localStorage.setItem(poolKey(networkRef.current), api.address);
         setContractAddress(api.address);
         subscribe(api);
       }),
@@ -113,11 +134,22 @@ export function useNightPool() {
       run("joining pool", async () => {
         const api = await NightPoolAPI.join(providersRef.current!, addr);
         apiRef.current = api;
+        localStorage.setItem(poolKey(networkRef.current), api.address);
         setContractAddress(api.address);
         subscribe(api);
       }),
     [run, subscribe],
   );
+
+  // forget the saved pool and return to the setup screen
+  const leave = useCallback(() => {
+    localStorage.removeItem(poolKey(networkRef.current));
+    subRef.current?.unsubscribe();
+    apiRef.current = null;
+    myOrders.current = [];
+    setContractAddress(undefined);
+    setPool(undefined);
+  }, []);
 
   const commit = useCallback(
     (draft: DraftOrder) =>
@@ -185,6 +217,7 @@ export function useNightPool() {
     connect,
     deploy,
     join,
+    leave,
     commit,
     revealAll,
     settle,

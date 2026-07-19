@@ -20,6 +20,9 @@
   --font-display: "Clash Display", ui-sans-serif, system-ui, sans-serif;
   --font-body: "General Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  /* strong custom curves — the built-in css easings are too weak */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   color-scheme: dark;
 }
 
@@ -79,10 +82,11 @@ h1, h2, h3 { font-family: var(--font-display); font-weight: 600; letter-spacing:
   border-radius: 12px;
   padding: 10px 16px;
   cursor: pointer;
-  transition: transform 0.08s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.2s ease;
+  transition: transform 160ms var(--ease-out), border-color 160ms var(--ease-out),
+    background 160ms var(--ease-out), box-shadow 200ms var(--ease-out);
 }
 .btn:hover:not(:disabled) { border-color: var(--line-strong); background: rgba(60, 44, 96, 0.55); }
-.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:active:not(:disabled) { transform: scale(0.97); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn.primary {
   color: #fff;
@@ -91,8 +95,14 @@ h1, h2, h3 { font-family: var(--font-display); font-weight: 600; letter-spacing:
   border: 1px solid rgba(179, 155, 255, 0.5);
   box-shadow: 0 8px 30px rgba(91, 63, 214, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
-.btn.primary:hover:not(:disabled) { box-shadow: 0 10px 40px rgba(124, 92, 255, 0.6); transform: translateY(-1px); }
+.btn.primary:hover:not(:disabled) { box-shadow: 0 12px 44px rgba(124, 92, 255, 0.6); }
 .btn.ghost { background: transparent; }
+.linklike {
+  background: none; border: none; color: var(--violet-2); cursor: pointer; font: inherit;
+  font-family: var(--font-mono); font-size: 11px; margin-left: 10px; padding: 0;
+  border-bottom: 1px solid transparent; transition: border-color 160ms var(--ease-out);
+}
+.linklike:hover { border-bottom-color: var(--violet-2); }
 
 /* ---------- top bar ---------- */
 .bar {
@@ -181,8 +191,11 @@ input[type="range"] { padding: 0; accent-color: var(--violet); cursor: pointer; 
 .side-toggle button {
   flex: 1; padding: 13px; font-family: var(--font-display); font-weight: 600; font-size: 15px;
   color: var(--muted); background: rgba(10, 7, 20, 0.5); border: 1px solid var(--line); border-radius: 12px;
-  cursor: pointer; transition: all 0.15s;
+  cursor: pointer;
+  transition: color 160ms var(--ease-out), border-color 160ms var(--ease-out),
+    background 160ms var(--ease-out), box-shadow 200ms var(--ease-out), transform 120ms var(--ease-out);
 }
+.side-toggle button:active { transform: scale(0.97); }
 .side-toggle button:hover { color: var(--text); }
 .side-toggle .on.buy { color: var(--buy); border-color: var(--buy); background: rgba(70, 224, 160, 0.1); box-shadow: 0 0 22px rgba(70, 224, 160, 0.2); }
 .side-toggle .on.sell { color: var(--sell); border-color: var(--sell); background: rgba(255, 97, 130, 0.1); box-shadow: 0 0 22px rgba(255, 97, 130, 0.2); }
@@ -244,13 +257,24 @@ input[type="range"] { padding: 0; accent-color: var(--violet); cursor: pointer; 
 .dust-line { font-family: var(--font-mono); font-size: 12px; color: var(--muted); margin-bottom: 16px; }
 .dust-line b { color: var(--buy); }
 
-/* animated entrance */
-.rise { animation: rise 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
-.rise-1 { animation-delay: 0.05s; }
-.rise-2 { animation-delay: 0.12s; }
-.rise-3 { animation-delay: 0.19s; }
-.rise-4 { animation-delay: 0.26s; }
-@keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+/* staggered entrance — never from scale(0); short stagger delays */
+.rise { animation: rise 460ms var(--ease-out) both; }
+.rise-1 { animation-delay: 40ms; }
+.rise-2 { animation-delay: 90ms; }
+.rise-3 { animation-delay: 140ms; }
+.rise-4 { animation-delay: 190ms; }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+/* respect reduced motion: keep fades, drop movement */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 80ms !important; }
+  .orb, .brand .dot { animation: none !important; }
+  .rise { animation: fadein 200ms ease both; }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+}
 
 /* ============ landing ============ */
 .landing { position: relative; }

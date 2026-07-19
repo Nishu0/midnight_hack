@@ -76,7 +76,12 @@ export default function App() {
               <div className="col-right">
                 <BatchStatus pool={np.pool} busy={np.busy} onReveal={np.revealAll} onSettle={np.settle} />
                 <DepthChart pool={np.pool} />
-                <div className="meta">pool · {np.contractAddress}</div>
+                <div className="meta">
+                  pool · {np.contractAddress}
+                  <button className="linklike" onClick={np.leave}>
+                    leave pool
+                  </button>
+                </div>
               </div>
             </main>
           )}
