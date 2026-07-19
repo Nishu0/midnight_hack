@@ -12,6 +12,8 @@
     "stack:down": "docker compose down",
     "compact": "pnpm --filter @nightpool/contract compact",
     "build:contract": "pnpm --filter @nightpool/contract build",
+    "backend": "pnpm --filter @nightpool/backend dev",
+    "db:push": "pnpm --filter @nightpool/backend db:push",
     "dev": "pnpm --filter @nightpool/frontend dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck"

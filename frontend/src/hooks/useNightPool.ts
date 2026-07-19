@@ -8,6 +8,7 @@ import type { ConnectedAPI } from "@midnight-ntwrk/dapp-connector-api";
 import { connectWallet } from "@/wallet";
 import { buildProviders } from "@/api/providers";
 import { NightPoolAPI } from "@/api/nightpool-api";
+import { registry } from "@/api/registry";
 import { config } from "@/config";
 import type { DraftOrder, PoolState } from "@/types";
 
@@ -30,6 +31,7 @@ export function useNightPool() {
   const apiRef = useRef<NightPoolAPI | null>(null);
   const walletRef = useRef<ConnectedAPI | null>(null);
   const networkRef = useRef<string>("");
+  const addressRef = useRef<string>("");
   const subRef = useRef<Subscription | null>(null);
   // remember our own committed orders so we can reveal/claim them later
   const myOrders = useRef<Order[]>([]);
@@ -51,6 +53,7 @@ export function useNightPool() {
       const { api, service, shielded, networkId } = await connectWallet(config.networkId);
       walletRef.current = api;
       networkRef.current = networkId;
+      addressRef.current = shielded.shieldedAddress;
       setAddress(shielded.shieldedAddress);
       setNetwork(networkId);
       const providers = buildProviders(
@@ -63,12 +66,15 @@ export function useNightPool() {
       providersRef.current = providers;
       setStatus("connected");
 
-      // rejoin a previously deployed pool on this network, if any
-      const saved = localStorage.getItem(poolKey(networkId));
+      // rejoin a previously deployed pool: prefer the backend registry (syncs
+      // across devices), fall back to localStorage if the backend is offline
+      const remote = await registry.latest(networkId);
+      const saved = remote?.address ?? localStorage.getItem(poolKey(networkId));
       if (saved) {
         try {
           const pool = await NightPoolAPI.join(providers, saved);
           apiRef.current = pool;
+          localStorage.setItem(poolKey(networkId), pool.address);
           setContractAddress(pool.address);
           subscribe(pool);
         } catch {
@@ -123,6 +129,7 @@ export function useNightPool() {
         const api = await NightPoolAPI.deploy(providersRef.current!);
         apiRef.current = api;
         localStorage.setItem(poolKey(networkRef.current), api.address);
+        void registry.save(networkRef.current, api.address, addressRef.current);
         setContractAddress(api.address);
         subscribe(api);
       }),
@@ -135,6 +142,7 @@ export function useNightPool() {
         const api = await NightPoolAPI.join(providersRef.current!, addr);
         apiRef.current = api;
         localStorage.setItem(poolKey(networkRef.current), api.address);
+        void registry.save(networkRef.current, api.address, addressRef.current);
         setContractAddress(api.address);
         subscribe(api);
       }),
@@ -143,7 +151,9 @@ export function useNightPool() {
 
   // forget the saved pool and return to the setup screen
   const leave = useCallback(() => {
+    const addr = apiRef.current?.address;
     localStorage.removeItem(poolKey(networkRef.current));
+    if (addr) void registry.remove(networkRef.current, addr);
     subRef.current?.unsubscribe();
     apiRef.current = null;
     myOrders.current = [];

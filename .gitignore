@@ -11,3 +11,5 @@ logs/
 frontend/public/midnight/
 .turbo/
 .pnpm-store/
+backend/data/
+backend/drizzle/

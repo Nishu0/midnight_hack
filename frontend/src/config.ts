@@ -14,6 +14,8 @@ export const config = {
   proofServer: env.VITE_PROOF_SERVER_URI ?? "http://127.0.0.1:6300",
   // where copy-keys drops the compiled prover/verifier assets
   zkConfigPath: "/midnight/nightpool",
+  // registry backend (stores public pool addresses per network)
+  backendUrl: env.VITE_BACKEND_URL ?? "http://localhost:8787",
 };
 
 // fixed grid params, mirror the contract
