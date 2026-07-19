@@ -19,12 +19,12 @@ export function useNightPool() {
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<string>();
 
-  const apiRef = useRef<NightPoolAPI>();
-  const subRef = useRef<Subscription>();
+  const apiRef = useRef<NightPoolAPI | null>(null);
+  const subRef = useRef<Subscription | null>(null);
   // remember our own committed orders so we can reveal/claim them later
   const myOrders = useRef<Order[]>([]);
 
-  const providersRef = useRef<ReturnType<typeof buildProviders>>();
+  const providersRef = useRef<ReturnType<typeof buildProviders> | null>(null);
 
   const connect = useCallback(async () => {
     setStatus("connecting");
@@ -32,7 +32,7 @@ export function useNightPool() {
     try {
       const { api, state, uris } = await connectWallet();
       setAddress(state.address);
-      providersRef.current = buildProviders(api, state.coinPublicKey, uris);
+      providersRef.current = buildProviders(api, state.coinPublicKey, state.encryptionPublicKey, uris);
       setStatus("connected");
     } catch (e) {
       setError((e as Error).message);
@@ -43,7 +43,7 @@ export function useNightPool() {
   const subscribe = useCallback((api: NightPoolAPI) => {
     subRef.current?.unsubscribe();
     subRef.current = api.state$().subscribe({
-      next: (raw: { data: unknown }) => setPool(api.ledgerOf(raw.data)),
+      next: (p) => setPool(p),
       error: (e: Error) => setError(e.message),
     });
   }, []);

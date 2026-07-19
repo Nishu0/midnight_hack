@@ -15,8 +15,14 @@ export type ServiceUriConfig = {
   substrateNodeUri: string;
 };
 
+export type WalletState = {
+  address: string;
+  coinPublicKey: string;
+  encryptionPublicKey: string;
+};
+
 export type WalletApi = {
-  state: () => Promise<{ address: string; coinPublicKey: string }>;
+  state: () => Promise<WalletState>;
   balanceAndProveTransaction: (tx: unknown) => Promise<unknown>;
   submitTransaction: (tx: unknown) => Promise<string>;
   serviceUriConfig: () => Promise<ServiceUriConfig>;

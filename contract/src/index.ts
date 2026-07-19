@@ -4,4 +4,5 @@
 // private-state helpers.
 
 export * as NightPool from "./managed/nightpool/contract/index.js";
+export type { Order, Ledger } from "./managed/nightpool/contract/index.js";
 export * from "./witnesses";
