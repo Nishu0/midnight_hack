@@ -35,8 +35,9 @@ export default function App() {
         <section className="card setup">
           <h2>start a pool</h2>
           <button className="btn primary" disabled={!!np.busy} onClick={np.deploy}>
-            deploy new pool
+            {np.busy === "deploying pool" ? "deploying…" : "deploy new pool"}
           </button>
+          {np.busy && <p className="hint">{np.busy}… generating a zk proof, this needs the proof server running and can take 30 to 60s.</p>}
           <div className="or">or</div>
           <div className="join">
             <input placeholder="contract address" value={joinAddr} onChange={(e) => setJoinAddr(e.target.value)} />

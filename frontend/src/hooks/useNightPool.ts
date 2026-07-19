@@ -60,10 +60,13 @@ export function useNightPool() {
   const run = useCallback(async (label: string, fn: () => Promise<void>) => {
     setBusy(label);
     setError(undefined);
+    console.info(`[nightpool] ${label}…`);
     try {
       await fn();
+      console.info(`[nightpool] ${label} ✓`);
     } catch (e) {
-      setError((e as Error).message);
+      console.error(`[nightpool] ${label} failed:`, e);
+      setError((e as Error).message ?? String(e));
     } finally {
       setBusy(undefined);
     }
