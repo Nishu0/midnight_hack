@@ -4,21 +4,23 @@ import type { DraftOrder, Side } from "@/types";
 
 type Props = {
   disabled: boolean;
+  poolBalance: bigint;
   onCommit: (draft: DraftOrder) => void;
 };
 
 const PRESETS = [50, 100, 250, 500];
 
-export function OrderForm({ disabled, onCommit }: Props) {
+export function OrderForm({ disabled, poolBalance, onCommit }: Props) {
   const [side, setSide] = useState<Side>("buy");
   const [amount, setAmount] = useState("100");
   const [tick, setTick] = useState(8);
 
   const price = tickToPrice(tick);
   const amt = Math.max(0, Math.floor(Number(amount) || 0));
+  const funded = poolBalance >= BigInt(amt);
 
   const submit = () => {
-    if (amt <= 0) return;
+    if (amt <= 0 || !funded) return;
     onCommit({ side, amount: BigInt(amt), limitTick: tick });
   };
 
@@ -63,7 +65,12 @@ export function OrderForm({ disabled, onCommit }: Props) {
         />
       </label>
 
-      <button className="btn primary xl" style={{ width: "100%" }} disabled={disabled || amt <= 0} onClick={submit}>
+      {!funded && amt > 0 && (
+        <p className="hint" style={{ color: "var(--sell)" }}>
+          not enough escrow — deposit at least {amt} in step 0 (private balance: {poolBalance.toString()}).
+        </p>
+      )}
+      <button className="btn primary xl" style={{ width: "100%" }} disabled={disabled || amt <= 0 || !funded} onClick={submit}>
         commit sealed order
       </button>
     </section>

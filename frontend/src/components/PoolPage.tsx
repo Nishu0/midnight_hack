@@ -64,7 +64,7 @@ export function PoolPage(p: Props) {
               </button>
             </div>
           </section>
-          <OrderForm disabled={!canCommit} onCommit={p.onCommit} />
+          <OrderForm disabled={!canCommit} poolBalance={p.poolBalance} onCommit={p.onCommit} />
           <ClaimPanel pool={p.pool} myOrders={p.myOrders} busy={p.busy} onClaim={p.onClaim} onCancel={p.onCancel} />
         </div>
         <div className="col-right">
