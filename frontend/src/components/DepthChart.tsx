@@ -12,8 +12,9 @@ export function DepthChart({ pool }: Props) {
   const clearing = pool?.phase === "settled" ? Number(pool.clearingTick) : -1;
 
   return (
-    <section className="card">
-      <h2>aggregate depth</h2>
+    <section className="card rise">
+      <div className="eyebrow">public aggregate</div>
+      <h2>depth by price tick</h2>
       <p className="hint">totals per tick are public; who bid what is not.</p>
       <div className="chart">
         {Array.from({ length: TICK_COUNT }, (_, t) => {

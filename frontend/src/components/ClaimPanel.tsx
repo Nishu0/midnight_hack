@@ -15,8 +15,9 @@ export function ClaimPanel({ pool, myOrders, busy, onClaim }: Props) {
   const clearing = Number(pool.clearingTick);
 
   return (
-    <section className="card">
-      <h2>claim</h2>
+    <section className="card rise">
+      <div className="eyebrow">step 4 · claim</div>
+      <h2>claim proceeds</h2>
       <p className="hint">withdraw fills via a nullifier, unlinkable to your commitment.</p>
 
       <ul className="orders">

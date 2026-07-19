@@ -13,9 +13,11 @@ type Props = {
 export function BatchStatus({ pool, busy, onReveal, onSettle }: Props) {
   if (!pool) return null;
   const step = phaseStep[pool.phase];
+  const remaining = Number(BigInt(BATCH_SIZE) - pool.committedCount);
 
   return (
-    <section className="card">
+    <section className="card rise">
+      <div className="eyebrow">steps 2 &amp; 3 · reveal + settle</div>
       <h2>
         batch #{pool.batchId.toString()}
         {busy && <span className="busy">{busy}…</span>}
@@ -31,7 +33,9 @@ export function BatchStatus({ pool, busy, onReveal, onSettle }: Props) {
 
       <div className="stats">
         <div>
-          <span>{pool.committedCount.toString()}/{BATCH_SIZE}</span>
+          <span>
+            {pool.committedCount.toString()}/{BATCH_SIZE}
+          </span>
           committed
         </div>
         <div>
@@ -47,6 +51,14 @@ export function BatchStatus({ pool, busy, onReveal, onSettle }: Props) {
           matched volume
         </div>
       </div>
+
+      {pool.phase === "commit" && (
+        <p className="hint">
+          {remaining > 0
+            ? `commit ${remaining} more order${remaining === 1 ? "" : "s"} to fill the batch and open reveal.`
+            : "batch full — opening reveal."}
+        </p>
+      )}
 
       <div className="actions">
         <button className="btn" disabled={pool.phase !== "reveal" || !!busy} onClick={onReveal}>
