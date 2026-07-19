@@ -29,6 +29,7 @@ export async function savePool(input: {
   name?: string;
   base?: string;
   quote?: string;
+  oracle?: string;
   label?: string;
 }): Promise<PoolRecord> {
   const id = `${input.network}:${input.address}`;
@@ -42,6 +43,7 @@ export async function savePool(input: {
       name: input.name,
       base: input.base,
       quote: input.quote,
+      oracle: input.oracle,
       label: input.label,
     })
     .onConflictDoUpdate({
@@ -51,6 +53,7 @@ export async function savePool(input: {
         name: input.name ?? null,
         base: input.base ?? null,
         quote: input.quote ?? null,
+        oracle: input.oracle ?? null,
         label: input.label ?? null,
       },
     })

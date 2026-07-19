@@ -6,9 +6,10 @@ import type { Subscription } from "rxjs";
 import type { Order } from "@nightpool/contract";
 import type { ConnectedAPI } from "@midnight-ntwrk/dapp-connector-api";
 import { connectWallet } from "@/wallet";
-import { buildProviders, buildVaultProviders } from "@/api/providers";
+import { buildProviders, buildVaultProviders, buildOracleProviders } from "@/api/providers";
 import { NightPoolAPI } from "@/api/nightpool-api";
 import { VaultAPI } from "@/api/vault-api";
+import { OracleAPI, type OracleSeries } from "@/api/oracle-api";
 import { noteStore, type LocalNote } from "@/api/note-store";
 import { registry, type PoolRecord, type PoolMeta } from "@/api/registry";
 import { config } from "@/config";
@@ -33,12 +34,16 @@ export function useNightPool() {
   const [vaultAddress, setVaultAddress] = useState<string>();
   const [vaultBalance, setVaultBalance] = useState<bigint>(0n);
   const [notes, setNotes] = useState<LocalNote[]>([]);
+  const [oracleSeries, setOracleSeries] = useState<OracleSeries>();
 
   const apiRef = useRef<NightPoolAPI | null>(null);
   const walletRef = useRef<ConnectedAPI | null>(null);
   const providersRef = useRef<ReturnType<typeof buildProviders> | null>(null);
   const vaultProvidersRef = useRef<ReturnType<typeof buildVaultProviders> | null>(null);
   const vaultApiRef = useRef<VaultAPI | null>(null);
+  const oracleProvidersRef = useRef<ReturnType<typeof buildOracleProviders> | null>(null);
+  const oracleApiRef = useRef<OracleAPI | null>(null);
+  const oracleSubRef = useRef<Subscription | null>(null);
   const networkRef = useRef<string>("");
   const addressRef = useRef<string>("");
   const subRef = useRef<Subscription | null>(null);
@@ -48,6 +53,15 @@ export function useNightPool() {
     subRef.current = api.state$().subscribe({
       next: (p) => setPool(p),
       error: (e: Error) => setError(e.message),
+    });
+  }, []);
+
+  const subscribeOracle = useCallback(() => {
+    oracleSubRef.current?.unsubscribe();
+    if (!oracleApiRef.current) return;
+    oracleSubRef.current = oracleApiRef.current.series$().subscribe({
+      next: (s) => setOracleSeries(s),
+      error: () => {},
     });
   }, []);
 
@@ -112,6 +126,13 @@ export function useNightPool() {
         shielded.shieldedEncryptionPublicKey,
         networkId,
       );
+      oracleProvidersRef.current = buildOracleProviders(
+        api,
+        service,
+        shielded.shieldedCoinPublicKey,
+        shielded.shieldedEncryptionPublicKey,
+        networkId,
+      );
       setStatus("connected");
       setPools(await registry.list(networkId));
       refreshNotes();
@@ -170,8 +191,19 @@ export function useNightPool() {
         setContractAddress(api.address);
         setPoolMeta(rec);
         subscribe(api);
+        // attach this pool's oracle, if it has one
+        oracleApiRef.current = null;
+        setOracleSeries(undefined);
+        if (rec.oracle) {
+          try {
+            oracleApiRef.current = await OracleAPI.join(oracleProvidersRef.current!, rec.oracle);
+            subscribeOracle();
+          } catch {
+            /* oracle unavailable */
+          }
+        }
       }),
-    [run, subscribe],
+    [run, subscribe, subscribeOracle],
   );
 
   const createPool = useCallback(
@@ -179,24 +211,39 @@ export function useNightPool() {
       run("deploying pool", async () => {
         const api = await NightPoolAPI.deploy(providersRef.current!);
         apiRef.current = api;
-        void registry.save(networkRef.current, api.address, { ...meta, deployer: addressRef.current });
+        // deploy a paired oracle so this pool has an on-chain price feed
+        let oracleAddr: string | undefined;
+        try {
+          const oracle = await OracleAPI.deploy(oracleProvidersRef.current!);
+          oracleApiRef.current = oracle;
+          oracleAddr = oracle.address;
+          subscribeOracle();
+        } catch {
+          oracleApiRef.current = null;
+        }
+        const full = { ...meta, deployer: addressRef.current, oracle: oracleAddr };
+        void registry.save(networkRef.current, api.address, full);
         await refreshPools();
         setOrders([]);
+        setOracleSeries(undefined);
         setContractAddress(api.address);
-        setPoolMeta(meta);
+        setPoolMeta(full);
         subscribe(api);
       }),
-    [run, subscribe, refreshPools],
+    [run, subscribe, subscribeOracle, refreshPools],
   );
 
   // go back to the pools list without forgetting the pool
   const closePool = useCallback(() => {
     subRef.current?.unsubscribe();
+    oracleSubRef.current?.unsubscribe();
     apiRef.current = null;
+    oracleApiRef.current = null;
     setContractAddress(undefined);
     setPoolMeta(undefined);
     setPool(undefined);
     setOrders([]);
+    setOracleSeries(undefined);
     void refreshPools();
   }, [refreshPools]);
 
@@ -228,7 +275,25 @@ export function useNightPool() {
 
   const forceReveal = useCallback(() => run("opening reveal", () => apiRef.current!.forceReveal()), [run]);
 
-  const settle = useCallback(() => run("settling batch", () => apiRef.current!.settle()), [run]);
+  const settle = useCallback(
+    () =>
+      run("settling batch", async () => {
+        await apiRef.current!.settle();
+        // record the settled batch to the pool's oracle (best-effort, public feed)
+        if (oracleApiRef.current) {
+          try {
+            const s = await apiRef.current!.snapshot();
+            const latest = await oracleApiRef.current.latestBatchId();
+            if (s.batchId === latest + 1n) {
+              await oracleApiRef.current.recordBatch(s.batchId, s.clearingTick, s.clearedVolume);
+            }
+          } catch (e) {
+            console.warn("[nightpool] oracle record skipped:", e);
+          }
+        }
+      }),
+    [run],
+  );
 
   const startNextBatch = useCallback(
     () => run("starting next batch", () => apiRef.current!.startNextBatch()),
@@ -243,7 +308,13 @@ export function useNightPool() {
     [run, orders],
   );
 
-  useEffect(() => () => subRef.current?.unsubscribe(), []);
+  useEffect(
+    () => () => {
+      subRef.current?.unsubscribe();
+      oracleSubRef.current?.unsubscribe();
+    },
+    [],
+  );
 
   // poll dust while connected so the user can watch it accrue
   useEffect(() => {
@@ -296,5 +367,7 @@ export function useNightPool() {
     deployVault,
     deposit,
     withdraw,
+    // oracle
+    oracleSeries,
   };
 }

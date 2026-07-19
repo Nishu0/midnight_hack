@@ -55,6 +55,7 @@ export default function App() {
           onSettle={np.settle}
           onStartNextBatch={np.startNextBatch}
           onClaim={np.claimAll}
+          oracleSeries={np.oracleSeries}
         />
       )}
 

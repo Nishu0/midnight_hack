@@ -142,6 +142,13 @@ export class NightPoolAPI {
     await this.deployed.callTx.startNextBatch();
   }
 
+  // one-shot read of current state (used right after settle to record to the oracle)
+  async snapshot(): Promise<PoolState> {
+    const st = await this.providers.publicDataProvider.queryContractState(this.address);
+    if (!st) throw new Error("pool state unavailable");
+    return flattenLedger(NightPool.ledger(st.data));
+  }
+
   state$(): Observable<PoolState> {
     return this.providers.publicDataProvider
       .contractStateObservable(this.address, { type: "latest" })

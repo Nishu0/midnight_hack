@@ -13,6 +13,7 @@ export type PoolRecord = {
   name?: string;
   base?: string;
   quote?: string;
+  oracle?: string;
   label?: string;
   createdAt: string;
 };
@@ -22,6 +23,7 @@ export type PoolMeta = {
   name?: string;
   base?: string;
   quote?: string;
+  oracle?: string;
   label?: string;
 };
 

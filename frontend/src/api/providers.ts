@@ -10,12 +10,13 @@ import { FetchZkConfigProvider } from "@midnight-ntwrk/midnight-js-fetch-zk-conf
 import type { ProvableCircuitId } from "@midnight-ntwrk/compact-js";
 import { types, networkId as networkIdApi } from "@midnight-ntwrk/midnight-js";
 import type { ConnectedAPI, Configuration } from "@midnight-ntwrk/dapp-connector-api";
-import { NightPool, type NightPoolPrivateState, Vault, type VaultPrivateState } from "@nightpool/contract";
+import { NightPool, type NightPoolPrivateState, Vault, type VaultPrivateState, Oracle } from "@nightpool/contract";
 import { config } from "@/config";
 import { inMemoryPrivateStateProvider } from "./in-memory-private-state-provider";
 
 export const NIGHTPOOL_PRIVATE_STATE_ID = "nightpoolPrivateState";
 export const VAULT_PRIVATE_STATE_ID = "vaultPrivateState";
+export const ORACLE_PRIVATE_STATE_ID = "oraclePrivateState";
 
 export type NightPoolCircuits = ProvableCircuitId<NightPool.Contract<NightPoolPrivateState>>;
 export type NightPoolProviders = types.MidnightProviders<
@@ -29,6 +30,13 @@ export type VaultProviders = types.MidnightProviders<
   VaultCircuits,
   typeof VAULT_PRIVATE_STATE_ID,
   VaultPrivateState
+>;
+
+export type OracleCircuits = ProvableCircuitId<Oracle.Contract<unknown>>;
+export type OracleProviders = types.MidnightProviders<
+  OracleCircuits,
+  typeof ORACLE_PRIVATE_STATE_ID,
+  unknown
 >;
 
 const walletBridge = (api: ConnectedAPI, coinPk: string, encPk: string) => {
@@ -100,6 +108,32 @@ export const buildVaultProviders = (
   networkIdApi.setNetworkId(network as any);
   const zk = new FetchZkConfigProvider<VaultCircuits>(
     `${window.location.origin}${config.zkVaultPath}`,
+    fetch.bind(window),
+  );
+  const proofUri = service.proverServerUri ?? config.proofServer;
+  const { wallet, midnight } = walletBridge(api, coinPk, encPk);
+  return {
+    privateStateProvider: inMemoryPrivateStateProvider(),
+    publicDataProvider: indexerPublicDataProvider(service.indexerUri, service.indexerWsUri),
+    zkConfigProvider: zk,
+    proofProvider: httpClientProofProvider(proofUri, zk),
+    walletProvider: wallet,
+    midnightProvider: midnight,
+  };
+};
+
+// oracle is a public contract (no witnesses); same bridge, oracle zk assets
+export const buildOracleProviders = (
+  api: ConnectedAPI,
+  service: Configuration,
+  coinPk: string,
+  encPk: string,
+  network: string,
+): OracleProviders => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  networkIdApi.setNetworkId(network as any);
+  const zk = new FetchZkConfigProvider<OracleCircuits>(
+    `${window.location.origin}${config.zkOraclePath}`,
     fetch.bind(window),
   );
   const proofUri = service.proverServerUri ?? config.proofServer;

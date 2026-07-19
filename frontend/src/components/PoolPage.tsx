@@ -3,7 +3,9 @@ import { BatchStatus } from "@/components/BatchStatus";
 import { DepthChart } from "@/components/DepthChart";
 import { ClaimPanel } from "@/components/ClaimPanel";
 import { Guide } from "@/components/Guide";
+import { OracleWidget } from "@/components/OracleWidget";
 import type { PoolMeta } from "@/api/registry";
+import type { OracleSeries } from "@/api/oracle-api";
 import type { PoolState, DraftOrder } from "@/types";
 import type { Order } from "@nightpool/contract";
 
@@ -21,6 +23,7 @@ type Props = {
   onSettle: () => void;
   onStartNextBatch: () => void;
   onClaim: () => void;
+  oracleSeries?: OracleSeries;
 };
 
 export function PoolPage(p: Props) {
@@ -55,6 +58,7 @@ export function PoolPage(p: Props) {
             onStartNextBatch={p.onStartNextBatch}
           />
           <DepthChart pool={p.pool} />
+          <OracleWidget series={p.oracleSeries} />
           <Guide pool={p.pool} />
           <div className="meta">pool · {p.address}</div>
         </div>

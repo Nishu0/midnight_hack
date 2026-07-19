@@ -9,6 +9,7 @@ export const pools = pgTable("pools", {
   name: text("name"),
   base: text("base"), // base token symbol
   quote: text("quote"), // quote token symbol
+  oracle: text("oracle"), // paired oracle contract address
   label: text("label"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });

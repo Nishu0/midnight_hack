@@ -27,4 +27,5 @@ export async function ensureSchema(): Promise<void> {
   await client`alter table pools add column if not exists name text`;
   await client`alter table pools add column if not exists base text`;
   await client`alter table pools add column if not exists quote text`;
+  await client`alter table pools add column if not exists oracle text`;
 }

@@ -15,6 +15,7 @@ export const config = {
   // where copy-keys drops the compiled prover/verifier assets
   zkConfigPath: "/midnight/nightpool",
   zkVaultPath: "/midnight/vault",
+  zkOraclePath: "/midnight/oracle",
   // registry backend (stores public pool addresses per network)
   backendUrl: env.VITE_BACKEND_URL ?? "http://localhost:8787",
 };
