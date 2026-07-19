@@ -1,14 +1,9 @@
-// node shims some midnight packages expect in the browser. vite-plugin-node-polyfills
-// provides the real implementations at runtime; this just makes sure the globals exist.
-import { Buffer } from "buffer";
-
+// vite-plugin-node-polyfills injects Buffer + process as real globals at build
+// time (see `globals` in vite.config.ts). this only backfills process.env.NODE_ENV
+// for any midnight lib that reads it during early module evaluation.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const g = globalThis as any;
 
-if (typeof g.Buffer === "undefined") {
-  g.Buffer = Buffer;
-}
-
-if (typeof g.process === "undefined") {
-  g.process = { env: { NODE_ENV: import.meta.env.MODE }, browser: true, version: "" };
-}
+if (g.process == null) g.process = { env: {} };
+if (g.process.env == null) g.process.env = {};
+if (g.process.env.NODE_ENV == null) g.process.env.NODE_ENV = import.meta.env.MODE;
