@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Subscription } from "rxjs";
 import type { Order } from "@nightpool/contract";
+import type { ConnectedAPI } from "@midnight-ntwrk/dapp-connector-api";
 import { connectWallet } from "@/wallet";
 import { buildProviders } from "@/api/providers";
 import { NightPoolAPI } from "@/api/nightpool-api";
@@ -20,8 +21,10 @@ export function useNightPool() {
   const [pool, setPool] = useState<PoolState>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<string>();
+  const [dust, setDust] = useState<{ balance: bigint; cap: bigint }>();
 
   const apiRef = useRef<NightPoolAPI | null>(null);
+  const walletRef = useRef<ConnectedAPI | null>(null);
   const subRef = useRef<Subscription | null>(null);
   // remember our own committed orders so we can reveal/claim them later
   const myOrders = useRef<Order[]>([]);
@@ -33,6 +36,7 @@ export function useNightPool() {
     setError(undefined);
     try {
       const { api, service, shielded, networkId } = await connectWallet(config.networkId);
+      walletRef.current = api;
       setAddress(shielded.shieldedAddress);
       setNetwork(networkId);
       providersRef.current = buildProviders(
@@ -148,10 +152,31 @@ export function useNightPool() {
 
   useEffect(() => () => subRef.current?.unsubscribe(), []);
 
+  // poll dust balance while connected so the user can watch it accrue from NIGHT
+  useEffect(() => {
+    if (status !== "connected") return;
+    let alive = true;
+    const tick = async () => {
+      try {
+        const d = await walletRef.current?.getDustBalance();
+        if (alive && d) setDust(d);
+      } catch {
+        /* ignore transient wallet errors */
+      }
+    };
+    void tick();
+    const id = setInterval(tick, 5000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [status]);
+
   return {
     status,
     address,
     network,
+    dust,
     contractAddress,
     pool,
     error,

@@ -34,6 +34,11 @@ export default function App() {
       {connected && !hasPool && (
         <section className="card setup">
           <h2>start a pool</h2>
+          <p className="hint">
+            dust (fees): {np.dust ? np.dust.balance.toString() : "…"}
+            {np.dust ? ` / cap ${np.dust.cap.toString()}` : ""}
+            {np.dust && np.dust.balance === 0n ? " — waiting for dust to generate from NIGHT" : ""}
+          </p>
           <button className="btn primary" disabled={!!np.busy} onClick={np.deploy}>
             {np.busy === "deploying pool" ? "deploying…" : "deploy new pool"}
           </button>
