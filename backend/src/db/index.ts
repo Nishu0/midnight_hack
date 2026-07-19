@@ -16,8 +16,15 @@ export async function ensureSchema(): Promise<void> {
       network text not null,
       address text not null,
       deployer text,
+      name text,
+      base text,
+      quote text,
       label text,
       created_at timestamptz not null default now()
     )
   `;
+  // add columns if the table predates them
+  await client`alter table pools add column if not exists name text`;
+  await client`alter table pools add column if not exists base text`;
+  await client`alter table pools add column if not exists quote text`;
 }

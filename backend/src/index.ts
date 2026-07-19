@@ -29,9 +29,9 @@ app.get("/api/pools/latest", async (req, res) => {
 
 // register a deployed/joined pool
 app.post("/api/pools", async (req, res) => {
-  const { network, address, deployer, label } = req.body ?? {};
+  const { network, address, deployer, name, base, quote, label } = req.body ?? {};
   if (!network || !address) return res.status(400).json({ error: "network and address required" });
-  const record = await savePool({ network, address, deployer, label });
+  const record = await savePool({ network, address, deployer, name, base, quote, label });
   res.status(201).json(record);
 });
 

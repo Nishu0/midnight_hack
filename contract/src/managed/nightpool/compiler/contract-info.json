@@ -279,7 +279,10 @@
   "ledger": [
     {
       "name": "phase",
-      "index": 0,
+      "index": [
+        0,
+        0
+      ],
       "exported": true,
       "storage": "Cell",
       "type": {
@@ -294,13 +297,19 @@
     },
     {
       "name": "batchId",
-      "index": 1,
+      "index": [
+        0,
+        1
+      ],
       "exported": true,
       "storage": "Counter"
     },
     {
       "name": "commitments",
-      "index": 2,
+      "index": [
+        0,
+        2
+      ],
       "exported": true,
       "storage": "Set",
       "type": {
@@ -310,7 +319,10 @@
     },
     {
       "name": "committedCount",
-      "index": 3,
+      "index": [
+        1,
+        0
+      ],
       "exported": true,
       "storage": "Cell",
       "type": {
@@ -320,7 +332,10 @@
     },
     {
       "name": "revealedCount",
-      "index": 4,
+      "index": [
+        1,
+        1
+      ],
       "exported": true,
       "storage": "Cell",
       "type": {
@@ -330,7 +345,10 @@
     },
     {
       "name": "demand",
-      "index": 5,
+      "index": [
+        1,
+        2
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -344,7 +362,10 @@
     },
     {
       "name": "supply",
-      "index": 6,
+      "index": [
+        1,
+        3
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -358,7 +379,10 @@
     },
     {
       "name": "nullifiers",
-      "index": 7,
+      "index": [
+        1,
+        4
+      ],
       "exported": true,
       "storage": "Set",
       "type": {
@@ -368,7 +392,10 @@
     },
     {
       "name": "clearingTick",
-      "index": 8,
+      "index": [
+        1,
+        5
+      ],
       "exported": true,
       "storage": "Cell",
       "type": {
@@ -378,7 +405,88 @@
     },
     {
       "name": "clearedVolume",
-      "index": 9,
+      "index": [
+        1,
+        6
+      ],
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 18446744073709551615
+      }
+    },
+    {
+      "name": "clearingSpread",
+      "index": [
+        1,
+        7
+      ],
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 18446744073709551615
+      }
+    },
+    {
+      "name": "totalBuyVolume",
+      "index": [
+        1,
+        8
+      ],
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 18446744073709551615
+      }
+    },
+    {
+      "name": "totalSellVolume",
+      "index": [
+        1,
+        9
+      ],
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 18446744073709551615
+      }
+    },
+    {
+      "name": "totalCleared",
+      "index": [
+        1,
+        10
+      ],
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 18446744073709551615
+      }
+    },
+    {
+      "name": "protocolFee",
+      "index": [
+        1,
+        11
+      ],
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 18446744073709551615
+      }
+    },
+    {
+      "name": "feesAccrued",
+      "index": [
+        1,
+        12
+      ],
       "exported": true,
       "storage": "Cell",
       "type": {
@@ -388,7 +496,10 @@
     },
     {
       "name": "filled",
-      "index": 10,
+      "index": [
+        1,
+        13
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -402,7 +513,10 @@
     },
     {
       "name": "claimed",
-      "index": 11,
+      "index": [
+        1,
+        14
+      ],
       "exported": true,
       "storage": "Set",
       "type": {

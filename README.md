@@ -1,4 +1,4 @@
-# nightpool
+# noctis
 
 sealed bid batch auction dex on [midnight](https://midnight.network). trades clear
 in discrete batches at a single uniform price. orders are committed as hashes,

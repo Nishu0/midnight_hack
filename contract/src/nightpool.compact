@@ -45,6 +45,16 @@ export ledger nullifiers: Set<Bytes<32>>;
 
 export ledger clearingTick: Uint<8>;   // 0 also means no cross
 export ledger clearedVolume: Uint<64>;
+export ledger clearingSpread: Uint<64>; // |demand - supply| at the clearing tick
+
+// running aggregates (public, per current batch)
+export ledger totalBuyVolume: Uint<64>;
+export ledger totalSellVolume: Uint<64>;
+export ledger totalCleared: Uint<64>;   // cumulative matched across settles
+
+// flat protocol fee taken per filled order at claim time, and what's accrued
+export ledger protocolFee: Uint<64>;
+export ledger feesAccrued: Uint<64>;
 
 // claim bookkeeping
 export ledger filled: Map<Bytes<32>, Uint<64>>;
@@ -54,7 +64,7 @@ export ledger claimed: Set<Bytes<32>>;
 witness getOrder(): Order;
 witness getSecretKey(): Bytes<32>;
 
-// tick grid = 16, batch size = 8. the reveal/settle loops below are fixed at 16.
+// tick grid = 16, batch size = 2. the reveal/settle loops below are fixed at 16.
 
 // commitment = h(sk, side, amount, limitTick, salt): binding + hiding
 export circuit orderCommitment(o: Order, sk: Bytes<32>): Bytes<32> {
@@ -91,16 +101,22 @@ constructor() {
   revealedCount = 0;
   clearingTick = 0;
   clearedVolume = 0;
+  clearingSpread = 0;
+  totalBuyVolume = 0;
+  totalSellVolume = 0;
+  totalCleared = 0;
+  protocolFee = 1;   // flat fee per filled order, in base units
+  feesAccrued = 0;
   batchId.increment(1);
 }
 
-// commit phase: publish just the hash. opens reveals once the batch fills (8).
+// commit phase: publish just the hash. opens reveals once the batch fills (2).
 export circuit commitOrder(commitment: Bytes<32>): [] {
   assert(phase == Phase.COMMIT, "NightPool: not in commit phase");
   assert(!commitments.member(disclose(commitment)), "NightPool: duplicate commitment");
   commitments.insert(disclose(commitment));
   committedCount = (committedCount + 1) as Uint<8>;
-  if (committedCount >= 8) {
+  if (committedCount >= 2) {
     phase = Phase.REVEAL;
   }
 }
@@ -124,6 +140,17 @@ export circuit revealOrder(): [] {
   const amt = disclose(o.amount);
   const isBuy = disclose(o.side) == 0;
 
+  // input validation
+  assert(amt > 0, "NightPool: amount must be positive");
+  assert(t < 16, "NightPool: limit tick out of range");
+
+  // running public aggregates for this batch
+  if (isBuy) {
+    totalBuyVolume = (totalBuyVolume + amt) as Uint<64>;
+  } else {
+    totalSellVolume = (totalSellVolume + amt) as Uint<64>;
+  }
+
   // touch every tick each reveal (uniform writes). buy adds to demand[p] for
   // p <= limit, sell adds to supply[p] for p >= limit.
   for (const p of 0..16) {
@@ -146,18 +173,26 @@ export circuit settleBatch(): [] {
 
   clearingTick = 0;
   clearedVolume = 0;
+  clearingSpread = 0;
 
+  // pick the tick with the most matched volume; break ties toward the tightest
+  // cross (smallest |demand - supply|), which is the fairest single price.
   for (const p of 0..16) {
     const pt = p as Uint<8>;
     const d = demand.member(pt) ? demand.lookup(pt) : 0 as Uint<64>;
     const s = supply.member(pt) ? supply.lookup(pt) : 0 as Uint<64>;
     const matched = d < s ? d : s;
-    if (matched > clearedVolume) {
+    const spread = d > s ? (d - s) as Uint<64> : (s - d) as Uint<64>;
+    const better = (matched > clearedVolume)
+      || ((matched == clearedVolume) && (matched > 0) && (spread < clearingSpread));
+    if (better) {
       clearedVolume = matched;
       clearingTick = pt;
+      clearingSpread = spread;
     }
   }
 
+  totalCleared = (totalCleared + clearedVolume) as Uint<64>;
   phase = Phase.SETTLED;
 }
 
@@ -183,7 +218,13 @@ export circuit claim(): [] {
     ? (limit >= clearingTick)
     : (limit <= clearingTick);
   const noCross = clearedVolume == 0;
-  const payout = (noCross || eligible) ? amt : 0 as Uint<64>;
+  const filledOrder = eligible && !noCross;
+
+  // refund in full on no-cross; on a real fill, take the flat protocol fee
+  const gross = (noCross || eligible) ? amt : 0 as Uint<64>;
+  const fee = (filledOrder && (gross >= protocolFee)) ? protocolFee : 0 as Uint<64>;
+  const payout = (gross - fee) as Uint<64>;
+  feesAccrued = (feesAccrued + fee) as Uint<64>;
 
   claimed.insert(disclose(cnul));
   filled.insert(disclose(cnul), payout);

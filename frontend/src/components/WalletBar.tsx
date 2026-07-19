@@ -8,13 +8,19 @@ type Props = {
   onHelp: () => void;
 };
 
-export function WalletBar({ status, address, network, onConnect, onHelp }: Props) {
+export function WalletBar({
+  status,
+  address,
+  network,
+  onConnect,
+  onHelp,
+}: Props) {
   const connected = status === "connected";
   return (
     <header className="bar">
       <div className="brand">
         <span className="dot" />
-        NightPool
+        Noctis
         <span className="tag">sealed-bid batch DEX</span>
       </div>
       <div className="bar-right">
@@ -22,11 +28,20 @@ export function WalletBar({ status, address, network, onConnect, onHelp }: Props
         {connected ? (
           <span className="addr mono">{short(address)}</span>
         ) : (
-          <button className="btn primary" onClick={onConnect} disabled={status === "connecting"}>
+          <button
+            className="btn primary"
+            onClick={onConnect}
+            disabled={status === "connecting"}
+          >
             {status === "connecting" ? "connecting…" : "connect Lace"}
           </button>
         )}
-        <button className="btn help-btn" onClick={onHelp} title="how it works" aria-label="how it works">
+        <button
+          className="btn help-btn"
+          onClick={onHelp}
+          title="how it works"
+          aria-label="how it works"
+        >
           ?
         </button>
       </div>

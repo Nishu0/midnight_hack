@@ -6,6 +6,9 @@ export const pools = pgTable("pools", {
   network: text("network").notNull(),
   address: text("address").notNull(),
   deployer: text("deployer"),
+  name: text("name"),
+  base: text("base"), // base token symbol
+  quote: text("quote"), // quote token symbol
   label: text("label"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });

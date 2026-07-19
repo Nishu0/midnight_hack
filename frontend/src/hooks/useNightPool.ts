@@ -1,5 +1,5 @@
-// top-level app state: wallet connection, deployed contract handle, live pool
-// state, and the four batch actions. one hook so App stays declarative.
+// app state: wallet session + a registry of pools + the currently open pool and
+// its four batch actions. one hook so the views stay declarative.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Subscription } from "rxjs";
@@ -8,35 +8,31 @@ import type { ConnectedAPI } from "@midnight-ntwrk/dapp-connector-api";
 import { connectWallet } from "@/wallet";
 import { buildProviders } from "@/api/providers";
 import { NightPoolAPI } from "@/api/nightpool-api";
-import { registry } from "@/api/registry";
+import { registry, type PoolRecord, type PoolMeta } from "@/api/registry";
 import { config } from "@/config";
 import type { DraftOrder, PoolState } from "@/types";
 
 type Status = "disconnected" | "connecting" | "connected" | "error";
 
-// remember the deployed pool per network so a refresh rejoins it instead of
-// asking to deploy again
-const poolKey = (net: string) => `nightpool.pool.${net}`;
-
 export function useNightPool() {
   const [status, setStatus] = useState<Status>("disconnected");
   const [address, setAddress] = useState<string>();
   const [network, setNetwork] = useState<string>();
+  const [pools, setPools] = useState<PoolRecord[]>([]);
   const [contractAddress, setContractAddress] = useState<string>();
+  const [poolMeta, setPoolMeta] = useState<PoolMeta>();
   const [pool, setPool] = useState<PoolState>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<string>();
   const [dust, setDust] = useState<{ balance: bigint; cap: bigint }>();
+  const [orders, setOrders] = useState<Order[]>([]);
 
   const apiRef = useRef<NightPoolAPI | null>(null);
   const walletRef = useRef<ConnectedAPI | null>(null);
+  const providersRef = useRef<ReturnType<typeof buildProviders> | null>(null);
   const networkRef = useRef<string>("");
   const addressRef = useRef<string>("");
   const subRef = useRef<Subscription | null>(null);
-  // remember our own committed orders so we can reveal/claim them later
-  const myOrders = useRef<Order[]>([]);
-
-  const providersRef = useRef<ReturnType<typeof buildProviders> | null>(null);
 
   const subscribe = useCallback((api: NightPoolAPI) => {
     subRef.current?.unsubscribe();
@@ -44,6 +40,34 @@ export function useNightPool() {
       next: (p) => setPool(p),
       error: (e: Error) => setError(e.message),
     });
+  }, []);
+
+  const run = useCallback(async (label: string, fn: () => Promise<void>) => {
+    setBusy(label);
+    setError(undefined);
+    console.info(`[nightpool] ${label}…`);
+    try {
+      await fn();
+      console.info(`[nightpool] ${label} ✓`);
+    } catch (e) {
+      const err = e as Error & { cause?: unknown };
+      console.error(`[nightpool] ${label} failed`, err);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const failure = (err?.cause as any)?.failure;
+      let msg =
+        err?.message || failure?.message || (err?.cause instanceof Error ? err.cause.message : undefined) || String(e);
+      if (failure?._tag === "Wallet.InsufficientFunds" || /insufficient funds|balance dust/i.test(msg)) {
+        msg = "insufficient dust for fees. fund this wallet with tNIGHT from the Midnight faucet and wait for dust to generate, then retry.";
+      }
+      setError(msg);
+    } finally {
+      setBusy(undefined);
+    }
+  }, []);
+
+  const refreshPools = useCallback(async () => {
+    if (!networkRef.current) return;
+    setPools(await registry.list(networkRef.current));
   }, []);
 
   const connect = useCallback(async () => {
@@ -56,116 +80,65 @@ export function useNightPool() {
       addressRef.current = shielded.shieldedAddress;
       setAddress(shielded.shieldedAddress);
       setNetwork(networkId);
-      const providers = buildProviders(
+      providersRef.current = buildProviders(
         api,
         service,
         shielded.shieldedCoinPublicKey,
         shielded.shieldedEncryptionPublicKey,
         networkId,
       );
-      providersRef.current = providers;
       setStatus("connected");
-
-      // rejoin a previously deployed pool: prefer the backend registry (syncs
-      // across devices), fall back to localStorage if the backend is offline
-      const remote = await registry.latest(networkId);
-      const saved = remote?.address ?? localStorage.getItem(poolKey(networkId));
-      if (saved) {
-        try {
-          const pool = await NightPoolAPI.join(providers, saved);
-          apiRef.current = pool;
-          localStorage.setItem(poolKey(networkId), pool.address);
-          setContractAddress(pool.address);
-          subscribe(pool);
-        } catch {
-          localStorage.removeItem(poolKey(networkId)); // stale address, fall back to setup
-        }
-      }
+      setPools(await registry.list(networkId));
     } catch (e) {
       setError((e as Error).message);
       setStatus("error");
     }
-  }, [subscribe]);
-
-  const run = useCallback(async (label: string, fn: () => Promise<void>) => {
-    setBusy(label);
-    setError(undefined);
-    console.info(`[nightpool] ${label}…`);
-    try {
-      await fn();
-      console.info(`[nightpool] ${label} ✓`);
-    } catch (e) {
-      const err = e as Error & { cause?: unknown };
-      console.error(`[nightpool] ${label} failed`);
-      console.error("  message:", err?.message);
-      console.error("  stack:", err?.stack);
-      console.error("  cause:", err?.cause);
-      try {
-        console.error("  json:", JSON.stringify(err, Object.getOwnPropertyNames(err ?? {})));
-      } catch {
-        /* ignore */
-      }
-      // midnight.js wraps failures in an effect Cause: real text is at cause.failure
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const failure = (err?.cause as any)?.failure;
-      let msg =
-        err?.message ||
-        failure?.message ||
-        (err?.cause instanceof Error ? err.cause.message : undefined) ||
-        String(e) ||
-        "unknown error (see console)";
-      if (failure?._tag === "Wallet.InsufficientFunds" || /insufficient funds|balance dust/i.test(msg)) {
-        msg = "insufficient dust for fees. fund this wallet with tNIGHT from the Midnight faucet and wait for dust to generate, then retry.";
-      }
-      setError(msg);
-    } finally {
-      setBusy(undefined);
-    }
   }, []);
 
-  const deploy = useCallback(
-    () =>
+  const openPool = useCallback(
+    (rec: { address: string } & PoolMeta) =>
+      run("opening pool", async () => {
+        const api = await NightPoolAPI.join(providersRef.current!, rec.address);
+        apiRef.current = api;
+        setOrders([]);
+        setContractAddress(api.address);
+        setPoolMeta(rec);
+        subscribe(api);
+      }),
+    [run, subscribe],
+  );
+
+  const createPool = useCallback(
+    (meta: PoolMeta) =>
       run("deploying pool", async () => {
         const api = await NightPoolAPI.deploy(providersRef.current!);
         apiRef.current = api;
-        localStorage.setItem(poolKey(networkRef.current), api.address);
-        void registry.save(networkRef.current, api.address, addressRef.current);
+        void registry.save(networkRef.current, api.address, { ...meta, deployer: addressRef.current });
+        await refreshPools();
+        setOrders([]);
         setContractAddress(api.address);
+        setPoolMeta(meta);
         subscribe(api);
       }),
-    [run, subscribe],
+    [run, subscribe, refreshPools],
   );
 
-  const join = useCallback(
-    (addr: string) =>
-      run("joining pool", async () => {
-        const api = await NightPoolAPI.join(providersRef.current!, addr);
-        apiRef.current = api;
-        localStorage.setItem(poolKey(networkRef.current), api.address);
-        void registry.save(networkRef.current, api.address, addressRef.current);
-        setContractAddress(api.address);
-        subscribe(api);
-      }),
-    [run, subscribe],
-  );
-
-  // forget the saved pool and return to the setup screen
-  const leave = useCallback(() => {
-    const addr = apiRef.current?.address;
-    localStorage.removeItem(poolKey(networkRef.current));
-    if (addr) void registry.remove(networkRef.current, addr);
+  // go back to the pools list without forgetting the pool
+  const closePool = useCallback(() => {
     subRef.current?.unsubscribe();
     apiRef.current = null;
-    myOrders.current = [];
     setContractAddress(undefined);
+    setPoolMeta(undefined);
     setPool(undefined);
-  }, []);
+    setOrders([]);
+    void refreshPools();
+  }, [refreshPools]);
 
   const commit = useCallback(
     (draft: DraftOrder) =>
       run("committing order", async () => {
         const order = await apiRef.current!.commit(draft);
-        myOrders.current = [...myOrders.current, order];
+        setOrders((prev) => [...prev, order]);
       }),
     [run],
   );
@@ -173,11 +146,9 @@ export function useNightPool() {
   const revealAll = useCallback(
     () =>
       run("revealing orders", async () => {
-        for (const order of myOrders.current) {
-          await apiRef.current!.reveal(order);
-        }
+        for (const order of orders) await apiRef.current!.reveal(order);
       }),
-    [run],
+    [run, orders],
   );
 
   const settle = useCallback(() => run("settling batch", () => apiRef.current!.settle()), [run]);
@@ -185,16 +156,14 @@ export function useNightPool() {
   const claimAll = useCallback(
     () =>
       run("claiming fills", async () => {
-        for (const order of myOrders.current) {
-          await apiRef.current!.claim(order);
-        }
+        for (const order of orders) await apiRef.current!.claim(order);
       }),
-    [run],
+    [run, orders],
   );
 
   useEffect(() => () => subRef.current?.unsubscribe(), []);
 
-  // poll dust balance while connected so the user can watch it accrue from NIGHT
+  // poll dust while connected so the user can watch it accrue
   useEffect(() => {
     if (status !== "connected") return;
     let alive = true;
@@ -203,7 +172,7 @@ export function useNightPool() {
         const d = await walletRef.current?.getDustBalance();
         if (alive && d) setDust(d);
       } catch {
-        /* ignore transient wallet errors */
+        /* ignore */
       }
     };
     void tick();
@@ -218,16 +187,19 @@ export function useNightPool() {
     status,
     address,
     network,
-    dust,
+    pools,
     contractAddress,
+    poolMeta,
     pool,
     error,
     busy,
-    myOrders: myOrders.current,
+    dust,
+    myOrders: orders,
     connect,
-    deploy,
-    join,
-    leave,
+    refreshPools,
+    createPool,
+    openPool,
+    closePool,
     commit,
     revealAll,
     settle,

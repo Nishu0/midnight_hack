@@ -10,11 +10,32 @@ export type PoolRecord = {
   network: string;
   address: string;
   deployer?: string;
+  name?: string;
+  base?: string;
+  quote?: string;
   label?: string;
   createdAt: string;
 };
 
+export type PoolMeta = {
+  deployer?: string;
+  name?: string;
+  base?: string;
+  quote?: string;
+  label?: string;
+};
+
 export const registry = {
+  async list(network: string): Promise<PoolRecord[]> {
+    try {
+      const r = await fetch(`${base}/api/pools?network=${encodeURIComponent(network)}`);
+      if (!r.ok) return [];
+      return (await r.json()) as PoolRecord[];
+    } catch {
+      return [];
+    }
+  },
+
   async latest(network: string): Promise<PoolRecord | null> {
     try {
       const r = await fetch(`${base}/api/pools/latest?network=${encodeURIComponent(network)}`);
@@ -25,12 +46,12 @@ export const registry = {
     }
   },
 
-  async save(network: string, address: string, deployer?: string): Promise<void> {
+  async save(network: string, address: string, meta: PoolMeta = {}): Promise<void> {
     try {
       await fetch(`${base}/api/pools`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ network, address, deployer }),
+        body: JSON.stringify({ network, address, ...meta }),
       });
     } catch {
       /* offline — localStorage still has it */

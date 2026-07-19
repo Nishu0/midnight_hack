@@ -6,14 +6,14 @@ const STEPS = [
   {
     icon: "🌘",
     badge: "welcome",
-    title: "welcome to NightPool",
+    title: "welcome to Noctis",
     body: "a dex where trades clear in sealed batches at one uniform price. here's the four-step flow you'll drive from this screen.",
   },
   {
     icon: "🔒",
     badge: "step 1 · commit",
     title: "commit a sealed order",
-    body: "pick buy or sell, an amount, and a limit price tick, then hit commit order. only a hash goes on-chain — nobody can see your size or price. a batch holds 8 orders; commit more (or have others join) to fill it.",
+    body: "pick buy or sell, an amount, and a limit price tick, then hit commit order. only a hash goes on-chain — nobody can see your size or price. a batch holds 2 orders; commit both (e.g. one buy, one sell) to fill it.",
   },
   {
     icon: "🔎",

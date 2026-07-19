@@ -26,15 +26,33 @@ export async function savePool(input: {
   network: string;
   address: string;
   deployer?: string;
+  name?: string;
+  base?: string;
+  quote?: string;
   label?: string;
 }): Promise<PoolRecord> {
   const id = `${input.network}:${input.address}`;
   const [row] = await db
     .insert(pools)
-    .values({ id, network: input.network, address: input.address, deployer: input.deployer, label: input.label })
+    .values({
+      id,
+      network: input.network,
+      address: input.address,
+      deployer: input.deployer,
+      name: input.name,
+      base: input.base,
+      quote: input.quote,
+      label: input.label,
+    })
     .onConflictDoUpdate({
       target: pools.id,
-      set: { deployer: input.deployer ?? null, label: input.label ?? null },
+      set: {
+        deployer: input.deployer ?? null,
+        name: input.name ?? null,
+        base: input.base ?? null,
+        quote: input.quote ?? null,
+        label: input.label ?? null,
+      },
     })
     .returning();
   return row;

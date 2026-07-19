@@ -32,7 +32,7 @@ export function Landing({ connecting, onConnect, onTour }: Props) {
           <span className="grad">settle in the light.</span>
         </h1>
         <p className="lede rise rise-3">
-          NightPool clears trades in private batches at a single uniform price. your order is a
+          Noctis clears trades in private batches at a single uniform price. your order is a
           sealed hash until the batch settles, so bots can't front-run, sandwich, or read your hand.
         </p>
         <div className="cta rise rise-4">

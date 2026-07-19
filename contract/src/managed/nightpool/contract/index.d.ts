@@ -85,6 +85,12 @@ export type Ledger = {
   };
   readonly clearingTick: bigint;
   readonly clearedVolume: bigint;
+  readonly clearingSpread: bigint;
+  readonly totalBuyVolume: bigint;
+  readonly totalSellVolume: bigint;
+  readonly totalCleared: bigint;
+  readonly protocolFee: bigint;
+  readonly feesAccrued: bigint;
   filled: {
     isEmpty(): boolean;
     size(): bigint;
