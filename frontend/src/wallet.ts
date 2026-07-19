@@ -1,50 +1,56 @@
-// lace dapp connector. the extension injects window.midnight.mnLace; enable()
-// returns the wallet api we use to balance/sign/submit and to read service uris.
+// midnight dapp connector (dapp-connector-api 4.x). wallets inject one or more
+// InitialAPI objects under window.midnight, keyed by an arbitrary uuid, so we
+// enumerate the values instead of hardcoding a key. connect(networkId) returns
+// the ConnectedAPI we drive.
 
-export type MidnightLace = {
-  apiVersion: string;
-  enable: () => Promise<WalletApi>;
-  isEnabled: () => Promise<boolean>;
-  serviceUriConfig: () => Promise<ServiceUriConfig>;
-};
-
-export type ServiceUriConfig = {
-  proverServerUri: string;
-  indexerUri: string;
-  indexerWsUri: string;
-  substrateNodeUri: string;
-};
-
-export type WalletState = {
-  address: string;
-  coinPublicKey: string;
-  encryptionPublicKey: string;
-};
-
-export type WalletApi = {
-  state: () => Promise<WalletState>;
-  balanceAndProveTransaction: (tx: unknown) => Promise<unknown>;
-  submitTransaction: (tx: unknown) => Promise<string>;
-  serviceUriConfig: () => Promise<ServiceUriConfig>;
-};
+import type { InitialAPI, ConnectedAPI, Configuration } from "@midnight-ntwrk/dapp-connector-api";
 
 declare global {
   interface Window {
-    midnight?: { mnLace?: MidnightLace };
+    midnight?: { [key: string]: InitialAPI };
   }
 }
 
-export const getLace = (): MidnightLace => {
-  const lace = window.midnight?.mnLace;
-  if (!lace) {
-    throw new Error("Lace (Midnight) wallet not found — install the extension and reload");
-  }
-  return lace;
+export type ShieldedAddresses = {
+  shieldedAddress: string;
+  shieldedCoinPublicKey: string;
+  shieldedEncryptionPublicKey: string;
 };
 
-export const connectWallet = async () => {
-  const lace = getLace();
-  const api = await lace.enable();
-  const [state, uris] = await Promise.all([api.state(), api.serviceUriConfig()]);
-  return { api, state, uris };
+export type ConnectedWallet = {
+  api: ConnectedAPI;
+  service: Configuration;
+  shielded: ShieldedAddresses;
+  networkId: string;
+};
+
+export const listWallets = (): InitialAPI[] => {
+  if (typeof window === "undefined" || !window.midnight) return [];
+  const out: InitialAPI[] = [];
+  for (const key in window.midnight) {
+    const w = window.midnight[key];
+    if (w && w.name && w.apiVersion && typeof w.connect === "function") out.push(w);
+  }
+  return out;
+};
+
+// prefer lace, otherwise the first injected midnight wallet
+const pickWallet = (): InitialAPI => {
+  const wallets = listWallets();
+  if (wallets.length === 0) {
+    throw new Error("no Midnight wallet found. install Lace (Midnight), unlock it, and reload.");
+  }
+  return wallets.find((w) => /lace/i.test(w.name) || /lace/i.test(w.rdns ?? "")) ?? wallets[0];
+};
+
+export const connectWallet = async (networkHint: string): Promise<ConnectedWallet> => {
+  const initial = pickWallet();
+  const api = await initial.connect(networkHint);
+  const [service, shielded, status] = await Promise.all([
+    api.getConfiguration(),
+    api.getShieldedAddresses(),
+    api.getConnectionStatus(),
+  ]);
+  const networkId = status.status === "connected" ? status.networkId : service.networkId;
+  return { api, service, shielded, networkId };
 };

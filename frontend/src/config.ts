@@ -1,15 +1,15 @@
-// network + service endpoints. defaults target the local standalone stack from
-// docker-compose.yml; override via .env for preview/preprod.
+// most service endpoints now come from the wallet (getConfiguration). we only keep
+// the network hint passed to connect(), the local zk asset path, and a proof server
+// fallback for wallets that don't report one.
 
-export type NetworkName = "undeployed" | "preview" | "preprod" | "mainnet";
+export type NetworkName = "undeployed" | "testnet" | "preview" | "preprod" | "mainnet";
 
 const env = import.meta.env;
 
 export const config = {
+  // network id hinted to the wallet on connect; the app then follows whatever the
+  // wallet reports back. set VITE_NETWORK_ID=undeployed for the local docker stack.
   networkId: (env.VITE_NETWORK_ID as NetworkName) ?? "undeployed",
-  indexer: env.VITE_INDEXER_URI ?? "http://127.0.0.1:8088/api/v4/graphql",
-  indexerWS: env.VITE_INDEXER_WS_URI ?? "ws://127.0.0.1:8088/api/v4/graphql/ws",
-  node: env.VITE_NODE_URI ?? "http://127.0.0.1:9944",
   proofServer: env.VITE_PROOF_SERVER_URI ?? "http://127.0.0.1:6300",
   // where copy-keys drops the compiled prover/verifier assets
   zkConfigPath: "/midnight/nightpool",

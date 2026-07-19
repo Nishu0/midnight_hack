@@ -1,15 +1,18 @@
-// assembles the midnight.js provider bundle the contract client needs, wiring the
-// connected lace wallet to the proof server, indexer and private state store.
+// assembles the midnight.js provider bundle, bridging the connected lace wallet
+// (dapp-connector 4.x, which speaks serialized-hex transactions) to midnight.js's
+// WalletProvider/MidnightProvider (which speak ledger transaction objects).
 
+import * as ledger from "@midnight-ntwrk/ledger-v8";
+import { fromHex, toHex } from "@midnight-ntwrk/compact-runtime";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { httpClientProofProvider } from "@midnight-ntwrk/midnight-js-http-client-proof-provider";
-import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
 import { FetchZkConfigProvider } from "@midnight-ntwrk/midnight-js-fetch-zk-config-provider";
 import type { ProvableCircuitId } from "@midnight-ntwrk/compact-js";
-import { types } from "@midnight-ntwrk/midnight-js";
+import { types, networkId as networkIdApi } from "@midnight-ntwrk/midnight-js";
+import type { ConnectedAPI, Configuration } from "@midnight-ntwrk/dapp-connector-api";
 import { NightPool, type NightPoolPrivateState } from "@nightpool/contract";
 import { config } from "@/config";
-import type { WalletApi, ServiceUriConfig } from "@/wallet";
+import { inMemoryPrivateStateProvider } from "./in-memory-private-state-provider";
 
 export const NIGHTPOOL_PRIVATE_STATE_ID = "nightpoolPrivateState";
 
@@ -20,38 +23,59 @@ export type NightPoolProviders = types.MidnightProviders<
   NightPoolPrivateState
 >;
 
-// bridge the lace dapp api onto the wallet + midnight provider surface. the exact
-// balance/prove/submit mapping still needs a live lace extension to verify, so the
-// adapter is cast to the provider interfaces here.
-const walletBridge = (api: WalletApi, coinPublicKey: string, encryptionPublicKey: string) =>
-  ({
-    getCoinPublicKey: () => coinPublicKey,
-    getEncryptionPublicKey: () => encryptionPublicKey,
-    balanceTx: (tx: unknown) => api.balanceAndProveTransaction(tx),
-    submitTx: (tx: unknown) => api.submitTransaction(tx),
-  }) as unknown as types.WalletProvider & types.MidnightProvider;
+const walletBridge = (api: ConnectedAPI, coinPk: string, encPk: string) => {
+  const wallet: types.WalletProvider = {
+    getCoinPublicKey: () => coinPk as unknown as ledger.CoinPublicKey,
+    getEncryptionPublicKey: () => encPk as unknown as ledger.EncPublicKey,
+    // hand the unsealed tx to lace to balance + pay fees, get it back sealed
+    async balanceTx(tx, _ttl): Promise<ledger.FinalizedTransaction> {
+      const serialized = toHex(tx.serialize());
+      // lace appends {sender} as a trailing arg, so pass an options object here
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const received = await (api as any).balanceUnsealedTransaction(serialized, {});
+      return ledger.Transaction.deserialize<ledger.SignatureEnabled, ledger.Proof, ledger.Binding>(
+        "signature",
+        "proof",
+        "binding",
+        fromHex(received.tx),
+      );
+    },
+  };
+
+  const midnight: types.MidnightProvider = {
+    submitTx: async (tx: ledger.FinalizedTransaction): Promise<ledger.TransactionId> => {
+      await api.submitTransaction(toHex(tx.serialize()));
+      return tx.identifiers()[0];
+    },
+  };
+
+  return { wallet, midnight };
+};
 
 export const buildProviders = (
-  api: WalletApi,
-  coinPublicKey: string,
-  encryptionPublicKey: string,
-  uris: ServiceUriConfig,
+  api: ConnectedAPI,
+  service: Configuration,
+  coinPk: string,
+  encPk: string,
+  network: string,
 ): NightPoolProviders => {
+  // keep ledger serialization on the same network the wallet is connected to
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  networkIdApi.setNetworkId(network as any);
+
   const zk = new FetchZkConfigProvider<NightPoolCircuits>(
     `${window.location.origin}${config.zkConfigPath}`,
     fetch.bind(window),
   );
-  const bridge = walletBridge(api, coinPublicKey, encryptionPublicKey);
+  const proofUri = service.proverServerUri ?? config.proofServer;
+  const { wallet, midnight } = walletBridge(api, coinPk, encPk);
+
   return {
-    privateStateProvider: levelPrivateStateProvider({
-      privateStateStoreName: "nightpool-private-state",
-      privateStoragePasswordProvider: () => "nightpool-demo-password",
-      accountId: coinPublicKey,
-    }),
-    publicDataProvider: indexerPublicDataProvider(uris.indexerUri, uris.indexerWsUri),
+    privateStateProvider: inMemoryPrivateStateProvider(),
+    publicDataProvider: indexerPublicDataProvider(service.indexerUri, service.indexerWsUri),
     zkConfigProvider: zk,
-    proofProvider: httpClientProofProvider(uris.proverServerUri, zk),
-    walletProvider: bridge,
-    midnightProvider: bridge,
+    proofProvider: httpClientProofProvider(proofUri, zk),
+    walletProvider: wallet,
+    midnightProvider: midnight,
   };
 };

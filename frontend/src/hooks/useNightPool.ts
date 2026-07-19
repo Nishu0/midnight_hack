@@ -7,6 +7,7 @@ import type { Order } from "@nightpool/contract";
 import { connectWallet } from "@/wallet";
 import { buildProviders } from "@/api/providers";
 import { NightPoolAPI } from "@/api/nightpool-api";
+import { config } from "@/config";
 import type { DraftOrder, PoolState } from "@/types";
 
 type Status = "disconnected" | "connecting" | "connected" | "error";
@@ -14,6 +15,7 @@ type Status = "disconnected" | "connecting" | "connected" | "error";
 export function useNightPool() {
   const [status, setStatus] = useState<Status>("disconnected");
   const [address, setAddress] = useState<string>();
+  const [network, setNetwork] = useState<string>();
   const [contractAddress, setContractAddress] = useState<string>();
   const [pool, setPool] = useState<PoolState>();
   const [error, setError] = useState<string>();
@@ -30,9 +32,16 @@ export function useNightPool() {
     setStatus("connecting");
     setError(undefined);
     try {
-      const { api, state, uris } = await connectWallet();
-      setAddress(state.address);
-      providersRef.current = buildProviders(api, state.coinPublicKey, state.encryptionPublicKey, uris);
+      const { api, service, shielded, networkId } = await connectWallet(config.networkId);
+      setAddress(shielded.shieldedAddress);
+      setNetwork(networkId);
+      providersRef.current = buildProviders(
+        api,
+        service,
+        shielded.shieldedCoinPublicKey,
+        shielded.shieldedEncryptionPublicKey,
+        networkId,
+      );
       setStatus("connected");
     } catch (e) {
       setError((e as Error).message);
@@ -118,6 +127,7 @@ export function useNightPool() {
   return {
     status,
     address,
+    network,
     contractAddress,
     pool,
     error,

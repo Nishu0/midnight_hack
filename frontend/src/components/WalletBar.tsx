@@ -1,11 +1,9 @@
-import type { NetworkName } from "@/config";
-
 const short = (a?: string) => (a ? `${a.slice(0, 8)}…${a.slice(-6)}` : "");
 
 type Props = {
   status: string;
   address?: string;
-  network: NetworkName;
+  network: string;
   onConnect: () => void;
 };
 

@@ -17,7 +17,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <WalletBar status={np.status} address={np.address} network={config.networkId} onConnect={np.connect} />
+      <WalletBar status={np.status} address={np.address} network={np.network ?? config.networkId} onConnect={np.connect} />
 
       {np.error && <div className="err">{np.error}</div>}
 
