@@ -75,11 +75,18 @@ export function useNightPool() {
       } catch {
         /* ignore */
       }
-      const msg =
+      // midnight.js wraps failures in an effect Cause: real text is at cause.failure
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const failure = (err?.cause as any)?.failure;
+      let msg =
         err?.message ||
+        failure?.message ||
         (err?.cause instanceof Error ? err.cause.message : undefined) ||
         String(e) ||
         "unknown error (see console)";
+      if (failure?._tag === "Wallet.InsufficientFunds" || /insufficient funds|balance dust/i.test(msg)) {
+        msg = "insufficient dust for fees. fund this wallet with tNIGHT from the Midnight faucet and wait for dust to generate, then retry.";
+      }
       setError(msg);
     } finally {
       setBusy(undefined);
